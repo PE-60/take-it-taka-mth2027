@@ -1,0 +1,1170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Match viewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0f1012; --panel:#17191c; --panel2:#1d2024; --line:#2a2e33; --line2:#3a3f46;
+  --fg:#e8eaed; --muted:#9aa0a8; --dim:#5f656d;
+  --home:#eb4646; --away:#32aaeb; --dead:#bdbdbd; --none:#4a4e55;
+  --good:#5adc5a; --warn:#f5d73c; --bad:#f03c3c;
+  --ring:#ffe600; --kick:#ffc800; --jump:#c850ff; --churn:#ff8cc8; --lost:#f03c3c; --bolt:#e650e6; --air:#78dcff;
+  --throw:#3cc8ff; --corner:#ffc83c; --goalkick:#ff78c8; --freekick:#5adc5a; --kickoff:#ffffff;
+  font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; font-size:13px; line-height:1.35;
+  font-variant-numeric:tabular-nums; color:var(--fg); background:var(--bg);
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg)}
+body{display:grid;grid-template-rows:44px 1fr auto;grid-template-columns:1fr 310px;grid-template-areas:"hdr hdr" "stage side" "tl side";height:100vh;overflow:hidden}
+.mono{font-family:"JetBrains Mono",ui-monospace,Consolas,monospace}
+.lbl{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}
+button,select,input[type=range]{font:inherit;color:var(--fg)}
+button{background:var(--panel2);border:1px solid var(--line2);border-radius:5px;padding:3px 9px;cursor:pointer}
+button:hover{border-color:var(--muted)}
+select{background:var(--panel2);border:1px solid var(--line2);border-radius:5px;padding:2px 6px}
+kbd{font:500 10.5px "JetBrains Mono",monospace;background:#23272c;border:1px solid var(--line2);border-bottom-width:2px;border-radius:3px;padding:0 4px;color:var(--muted)}
+#hdr{grid-area:hdr;display:flex;align-items:center;gap:14px;padding:0 14px;border-bottom:1px solid var(--line);background:var(--panel)}
+#hdr .title{font-weight:600} #hdr .sub{color:var(--muted)} #hdr .sp{flex:1}
+#clock{display:flex;gap:16px;align-items:baseline} #clock .big{font-size:16px;font-weight:600}
+#loopInd{color:var(--air);font-size:12px}
+#stage{grid-area:stage;position:relative;display:flex;align-items:center;justify-content:center;background:#000;overflow:hidden}
+#wrap{position:relative}
+video{display:block}
+#ov{position:absolute;left:0;top:0}
+#mag{position:absolute;display:none;border:1px solid #fff;border-radius:50%;pointer-events:none;z-index:6;box-shadow:0 4px 18px rgba(0,0,0,.6)}
+#possCard{position:absolute;left:12px;top:12px;display:flex;gap:10px;pointer-events:none}
+.card{background:rgba(15,16,18,.78);backdrop-filter:blur(6px);border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:150px}
+.card .big{font-size:40px;font-weight:600;line-height:1;margin:2px 0 4px} .card .name{font-weight:500} .card .sub{color:var(--muted);font-size:12px}
+#tip,#tip2{position:absolute;pointer-events:none;background:rgba(15,16,18,.94);border:1px solid var(--line2);border-radius:6px;padding:6px 9px;font-size:12px;display:none;z-index:9;white-space:nowrap}
+#tip2{position:fixed}
+#side{grid-area:side;border-left:1px solid var(--line);background:var(--panel);overflow-y:auto;display:flex;flex-direction:column}
+.sec{padding:10px 12px;border-bottom:1px solid var(--line)}
+.sec h3{margin:0 0 8px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500;display:flex;gap:8px;align-items:baseline}
+.row{display:flex;justify-content:space-between;gap:8px;padding:2px 0} .row .k{color:var(--muted)} .row .v{text-align:right}
+.chk{display:flex;align-items:center;gap:7px;padding:2px 0;cursor:pointer} .chk input{accent-color:var(--away)}
+.sw{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:middle}
+.ev{display:flex;gap:8px;align-items:center;padding:3px 4px;border-radius:4px;cursor:pointer} .ev:hover{background:var(--panel2)} .ev.cur{background:#2b3a4a}
+.ev .g{width:10px;height:10px;flex:none} .ev .t{flex:1} .ev .f{color:var(--muted);font-size:12px}
+.ev .st{width:14px;text-align:center;font-weight:600;color:var(--dim)} .st.done{color:var(--good)} .st.skipped{color:var(--muted)} .st.flagged{color:var(--bolt)}
+.pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;color:#000}
+textarea{width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:5px;color:var(--fg);font:inherit;padding:5px;resize:vertical;min-height:40px}
+.hint{color:var(--dim);font-size:11.5px}
+.pal{display:grid;grid-template-columns:1fr 1fr;gap:3px 6px;margin:4px 0 6px}
+.tool{display:flex;align-items:center;gap:6px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;cursor:pointer;background:var(--panel2);font-size:12px}
+.tool:hover{border-color:var(--muted)} .tool.armed{border-color:#fff;background:#2b3a4a} .tool .sw{margin:0} .tool kbd{margin-left:auto}
+#armed{font-size:12px;color:var(--warn);min-height:16px}
+.rule{background:#2a2410;border:1px solid #5a4a16;border-radius:6px;padding:6px 8px;font-size:11.5px;color:#e6d28a;margin-bottom:8px}
+.presets{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px}
+#tl{grid-area:tl;position:relative;border-top:1px solid var(--line);background:var(--panel);padding:8px 12px 10px;display:grid;grid-template-columns:112px 1fr;grid-template-rows:auto auto auto;gap:4px 8px}
+#tlctl{grid-column:1/3;display:flex;gap:8px;align-items:center;flex-wrap:wrap;position:relative} #tlctl .sp{flex:1}
+#rowlabels{position:relative} #rowlabels div{position:absolute;left:0;right:0;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;line-height:1}
+#rowlabels div.grp{color:var(--dim);letter-spacing:.06em;text-transform:uppercase;font-size:10px} #rowlabels div.pin{color:#fff}
+#tlc{display:block;width:100%;cursor:crosshair}
+#legend{grid-column:1/3;display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);align-items:center} #legend span{display:inline-flex;align-items:center;gap:5px} #legend canvas{width:12px;height:12px}
+#rowpop,#ovpop{position:absolute;right:0;top:100%;margin-top:4px;max-height:60vh;overflow:auto;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:10px 12px;display:none;z-index:8;min-width:260px;box-shadow:0 8px 24px rgba(0,0,0,.5)} #rowpop .grp{margin:6px 0 2px}
+#help{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;z-index:20} #help .box{position:absolute;right:320px;top:60px;width:520px;max-height:85vh;overflow:auto;background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:14px 18px}
+#help .box h2{margin:0 0 10px;font-size:14px}
+</style>
+</head>
+<body>
+<header id="hdr">
+  <span class="title">Match viewer</span><span class="sub" id="srcName">-</span>
+  <span class="sp"></span>
+  <div id="clock"><span class="big mono" id="clkFrame">frame -</span><span class="mono" id="clkTime">-</span><span class="sub" id="clkHalf"></span><span id="loopInd"></span></div>
+  <span class="sp"></span>
+  <button id="bPlay" title="space">▶ play</button>
+  <select id="speed" title="[ and ]"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select>
+  <button id="bHelp" title="?">? shortcuts</button>
+</header>
+
+<div id="stage"><div id="wrap"><video id="v" preload="auto" muted playsinline></video><canvas id="ov"></canvas><canvas id="mag"></canvas><div id="possCard"></div><div id="tip"></div></div></div>
+<div id="tip2"></div>
+
+<aside id="side">
+  <div class="sec" id="frameInfo"><h3>This frame</h3><div id="fi"></div></div>
+
+  <div class="sec" id="cand"><h3>Candidates <span class="hint" id="candN"></span></h3>
+    <select id="candType" style="width:100%;margin-bottom:6px">
+      <option value="gt_vs_lh">GT ≠ L&amp;H heuristic (segment starts)</option>
+      <option value="gt_vs_pred">GT ≠ prediction (segment starts)</option>
+      <option value="gt_change">GT transitions</option>
+      <option value="restart">restarts (dead ball ends)</option>
+      <option value="kick">kicks</option>
+      <option value="lost">ball lost (stretch starts)</option>
+      <option value="jump">teleports (ball / player)</option>
+      <option value="churn">vanish / appear</option>
+      <option value="ambig">ambiguous ring (0 or ≥2 players within radius, GT alive)</option>
+    </select>
+    <div class="hint" style="margin-bottom:4px"><kbd>Enter</kbd> done · <kbd>Backspace</kbd> skipped · <kbd>!</kbd> flagged · each advances to the next unhandled · <label class="chk" style="display:inline-flex"><input type="checkbox" id="inclHandled"> step through handled too</label></div>
+    <div id="cands" style="max-height:200px;overflow:auto"></div>
+  </div>
+
+  <div class="sec" id="ann"><h3>Annotate</h3>
+    <div class="rule">Rule 1 of the challenge: hand labels or corrections on <b>this</b> game may not be used for the submission, training or validation. Use these to characterise failures and data errors for your write-up, or to label other games.</div>
+    <div class="lbl" style="margin:4px 0 2px">possession reading · segment (team <kbd>H</kbd> <kbd>A</kbd>, state below)</div>
+    <div class="pal" id="palState"></div>
+    <div class="lbl" style="margin:4px 0 2px">event · point at this frame</div>
+    <div class="pal" id="palEvent"></div>
+    <div class="lbl" style="margin:4px 0 2px">data error · interval: key opens, same key or Enter closes</div>
+    <div class="pal" id="palData"></div>
+    <div id="armed"></div>
+    <textarea id="note" placeholder="note for the next annotation or bookmark…" style="margin-top:6px"></textarea>
+    <div class="hint" id="noteInd"></div>
+    <div style="display:flex;gap:6px;align-items:center;margin-top:6px"><span class="lbl">show</span>
+      <select id="annFilter" style="flex:1"><option value="">all categories</option><option value="event">events</option><option value="data">data errors</option></select>
+      <span class="hint" id="annN"></span></div>
+    <div id="annList" style="max-height:200px;overflow:auto;margin-top:4px"></div>
+    <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+      <button id="bExpA">export json</button><button id="bExpAC">export csv</button><button id="bExpHR" title="frame, team, state, derived_label, annotator (not a submission file)">export human reading</button>
+      <label class="tool" style="padding:3px 9px">import json<input type="file" id="impA" accept=".json" style="display:none"></label><button id="bClr">clear mine</button>
+    </div>
+    <h3 style="margin-top:10px">Second annotator (layer B)</h3>
+    <div id="agree"></div>
+    <button id="bClearB" style="margin-top:4px">remove layer B</button>
+  </div>
+
+  <div class="sec" id="bm"><h3>Bookmarks</h3>
+    <div style="display:flex;gap:6px;flex-wrap:wrap"><button id="bAdd">+ bookmark (B)</button><button id="bExpB">export bookmarks</button></div>
+    <div id="bms" style="margin-top:6px;max-height:160px;overflow:auto"></div>
+  </div>
+
+  <div class="sec"><h3>Pinned</h3><div id="pinned" class="hint">click a player on the pitch to pin; shift-click two for a distance; click a slot row label to pin that slot</div></div>
+
+  <div class="sec"><h3>Layers</h3><div id="layers"></div>
+    <div class="row" style="margin-top:6px"><span class="k">possession radius</span><span class="v" id="radV">1.0 m</span></div>
+    <input type="range" id="rad" min="0.5" max="3" step="0.1" value="1" style="width:100%">
+    <div class="hint">recomputes NAIVE, L&amp;H and the candidate list live</div>
+  </div>
+</aside>
+
+<div id="tl">
+  <div id="tlctl">
+    <span class="lbl">timeline</span>
+    <span class="hint">click = seek · drag = zoom · wheel = zoom at cursor · click the overview to jump</span>
+    <span class="sp"></span>
+    <button id="bOverview">overview ▾</button><div id="ovpop"></div>
+    <button id="bRows">rows ▾</button><div id="rowpop"></div>
+    <span class="lbl">step events</span>
+    <select id="stepType">
+      <option value="restart">restarts</option><option value="gt_change">GT transitions</option><option value="kick">kicks</option>
+      <option value="lost">ball lost</option><option value="jump">teleports</option><option value="churn">vanish/appear</option><option value="cand">candidate queue</option>
+    </select>
+    <button id="bPrev">‹ prev</button><button id="bNext">next ›</button>
+  </div>
+  <div id="rowlabels"></div>
+  <canvas id="tlc"></canvas>
+  <div id="legend"></div>
+</div>
+
+<div id="help"><div class="box"><h2>Shortcuts</h2><div id="helpBody"></div><div class="hint" style="margin-top:8px">Esc or click outside closes</div></div></div>
+
+<script type="module">
+// ===== data.js =====
+// Read only access to one export (meta.json plus data.bin).
+// r is the frame index inside the export, 0..n-1. The video frame is start + r.
+// One frame in data.bin is a block of floats: 9 for the homography, 6 for the ball
+// (x, y, z, speed from the data, speed from frames, acceleration), then 4 per slot
+// (x, y, speed from the data, speed from frames).
+
+class DataSet {
+  constructor(meta, f32) {
+    this.meta = meta; this.D = f32;
+    this.n = meta.n; this.fps = meta.fps; this.start = meta.start; this.end = meta.end;
+    this.S = meta.n_slots; this.block = meta.block; this.pitch = meta.pitch;
+    this.slots = meta.slots;
+  }
+  H(r) { const o = r * this.block; return Number.isFinite(this.D[o]) ? this.D.subarray(o, o + 9) : null; }
+  ball(r) {
+    if (r < 0 || r >= this.n) return null;
+    const o = r * this.block + 9, D = this.D;
+    return Number.isFinite(D[o]) ? { x: D[o], y: D[o + 1], z: D[o + 2], sd: D[o + 3], sf: D[o + 4], acc: D[o + 5] } : null;
+  }
+  slot(r, k) {
+    if (r < 0 || r >= this.n) return null;
+    const o = r * this.block + 15 + 4 * k, D = this.D;
+    return Number.isFinite(D[o]) ? { x: D[o], y: D[o + 1], sd: D[o + 2], sf: D[o + 3], k } : null;
+  }
+  players(r) { const out = []; for (let k = 0; k < this.S; k++) { const p = this.slot(r, k); if (p) out.push(p); } return out; }
+  present(r, k) { return Number.isFinite(this.D[r * this.block + 15 + 4 * k]); }
+  sideOf(k) { return this.slots[k].team; }
+  numOf(k) { return this.slots[k].num; }
+  metres(a, b) { return Math.hypot((a.x - b.x) * this.pitch[0], (a.y - b.y) * this.pitch[1]); }
+  proj(Hm, x, y) { const w = Hm[6] * x + Hm[7] * y + Hm[8]; return [(Hm[0] * x + Hm[1] * y + Hm[2]) / w, (Hm[3] * x + Hm[4] * y + Hm[5]) / w]; }
+  inv3(h) {
+    const [a, b, c, d, e, f, g, hh, i] = h;
+    const A = e * i - f * hh, B = -(d * i - f * g), C = d * hh - e * g, det = a * A + b * B + c * C;
+    return [A / det, -(b * i - c * hh) / det, (b * f - c * e) / det, B / det, (a * i - c * g) / det, -(a * f - c * d) / det, C / det, -(a * hh - b * g) / det, (a * e - b * d) / det];
+  }
+  pitchFromPx(r, px, py) { const Hm = this.H(r); if (!Hm) return null; const p = this.proj(this.inv3(Hm), px, py); return { x: p[0], y: p[1] }; }
+  halfOf(f) { for (const h in this.meta.halves) { const [a, b] = this.meta.halves[h]; if (f >= a && f <= b) return +h; } return 0; }
+  attackDir(f) { const hv = this.meta.halves; if (!this.meta.home_dir || !hv || !hv['2']) return 0; return f < hv['2'][0] ? this.meta.home_dir : -this.meta.home_dir; }
+  gt(r) { return this.meta.gt ? this.meta.gt[r] : null; }
+  pred(r) { return this.meta.pred ? this.meta.pred[r] : null; }
+}
+
+
+// ===== events.js =====
+// Event lists worked out from the export: kicks, lost ball stretches, jumps and so on.
+// All frame indices are relative to the export.
+class EventIndex {
+  constructor(ds) {
+    const m = ds.meta, n = ds.n;
+    this.kick = new Set(m.events.kick);
+    this.lostStarts = []; let inLost = false;
+    for (let r = 0; r < n; r++) { const b = ds.ball(r); if (!b && !inLost) this.lostStarts.push(r); inLost = !b; }
+    this.jumpFrames = [...new Set([...m.events.bjump.map(e => e[0]), ...m.events.pjump.map(e => e[0])])].sort((a, b) => a - b);
+    this.churnFrames = [...new Set([...m.events.vanish.map(e => e[0]), ...m.events.appear.map(e => e[0])])].sort((a, b) => a - b);
+    this.gtChanges = []; this.restartFrames = [];
+    if (m.gt) for (let r = 1; r < n; r++) {
+      if (m.gt[r] !== m.gt[r - 1]) this.gtChanges.push(r);
+      if (m.gt[r - 1] === 'D' && (m.gt[r] === 'H' || m.gt[r] === 'A')) this.restartFrames.push(r);
+    }
+    for (const f of m.flags) { const r = f.f - ds.start; if (r >= 0 && r < n) this.restartFrames.push(r); }
+    this.restartFrames = [...new Set(this.restartFrames)].sort((a, b) => a - b);
+    this.flags = m.flags.map(f => ({ ...f, r: f.f - ds.start }));
+    this.bjump = new Set(m.events.bjump.map(e => e[0]));
+    this.pjump = new Set(m.events.pjump.map(e => e[0]));
+  }
+  list(name) {
+    switch (name) {
+      case 'restart': return this.restartFrames; case 'gt_change': return this.gtChanges; case 'kick': return [...this.kick].sort((a, b) => a - b);
+      case 'lost': return this.lostStarts; case 'jump': return this.jumpFrames; case 'churn': return this.churnFrames;
+    }
+    return [];
+  }
+}
+const deriveEvents = ds => new EventIndex(ds);
+
+
+// ===== possession.js =====
+// Two possession heuristics, following Link and Hoernig (2017).
+//   naive: whoever is nearest to the ball, if within tp metres
+//   L&H:   you gain the ball the naive way and keep it while the ball, predicted one second
+//          ahead, stays within ta metres of where you will be. A kick with someone else nearest
+//          opens it up again. The team sticks with the last holder while nobody has it,
+//          which is what the challenge says about loose balls.
+function computePossession(ds, kickSet, tp, ta = 2.5, horizonS = 1.0) {
+  const n = ds.n, S = ds.S;
+  const naive = new Array(n).fill(''), lh = new Array(n).fill('');
+  const naivePid = new Int16Array(n).fill(-1), lhPid = new Int16Array(n).fill(-1);
+  const side = []; for (let k = 0; k < S; k++) side.push(ds.sideOf(k));
+  let holder = -1, lastTeam = ''; const h = Math.round(horizonS * ds.fps);
+  const dist = new Float32Array(S);
+  for (let r = 0; r < n; r++) {
+    const b = ds.ball(r); if (!b) { holder = -1; lh[r] = lastTeam; continue; }
+    let best = -1, bd = Infinity;
+    for (let k = 0; k < S; k++) { const p = ds.slot(r, k); if (!p) { dist[k] = Infinity; continue; } const d = ds.metres(b, p); dist[k] = d; if (d < bd) { bd = d; best = k; } }
+    if (best >= 0 && bd <= tp) { naive[r] = side[best]; naivePid[r] = best; }
+    if (holder >= 0 && ds.slot(r, holder)) {
+      const r2 = Math.min(n - 1, r + h), b2 = ds.ball(r2), p2 = ds.slot(r2, holder);
+      const df = (b2 && p2) ? ds.metres(b2, p2) : dist[holder];
+      const kicked = kickSet.has(r) && best >= 0 && bd <= tp && best !== holder;
+      if (df > ta || kicked) holder = -1;
+    } else holder = -1;
+    if (holder < 0 && best >= 0 && bd <= tp) holder = best;
+    if (holder >= 0) { lastTeam = side[holder]; lhPid[r] = holder; }
+    lh[r] = lastTeam;                                   // the team stays through flight, duels and lost tracking
+  }
+  return { naive, lh, naivePid, lhPid, tp };
+}
+
+
+// ===== annotations.js =====
+// Everything the user writes down lives here. No DOM, no localStorage: whoever creates the store
+// hands in something with get(key) and set(key, value).
+//
+// Three kinds of things, one vocabulary:
+//   segment   {f, team, state}   my possession reading, runs until the next segment
+//   point     {f, cat, type, ...} an event or a data error at one frame
+//   interval  a point with an f2, for data errors that last a while
+// Layer A is mine and editable, layer B is someone else's import and read only.
+
+const SCHEMA = {
+  state: { segment: true, items: [
+    ['controlled', '1', 'controlled possession', '#5adc5a'], ['flight', '2', 'pass / ball in flight', '#78dcff'],
+    ['loose', '3', 'loose ball / contested', '#f5d73c'], ['dead', '4', 'dead ball', '#bdbdbd'], ['clear', '0', 'clear from here', '#4a4e55']] },
+  event: { items: [
+    ['pass', 'P', 'pass', '#5adc5a'], ['shot', 'S', 'shot', '#ff8c3c'], ['tackle', 'T', 'tackle / duel', '#f5d73c'],
+    ['interception', 'I', 'interception', '#ff5a5a'], ['clearance', 'C', 'clearance', '#c8ff78'], ['deflection', 'J', 'deflection (no control)', '#dcdcdc'],
+    ['foul', 'F', 'foul', '#ff3cb4'], ['out', 'O', 'ball out of play', '#ff3c3c'], ['restart', 'K', 'restart taken', '#ffffff']] },
+  data: { interval: true, items: [
+    ['ball_pos', 'N', 'true ball position', '#ffe600', 'pitch'], ['player_missing', 'M', 'player missing', '#ff8cc8', 'pitch+team'],
+    ['ghost', 'G', 'ghost / duplicate marker', '#c850ff', 'player'], ['wrong_team', 'W', 'wrong team for marker', '#ff5a5a', 'player'],
+    ['id_swap', 'V', 'identity swap', '#c850ff', 'player2'], ['lag', 'Y', 'marker lags the real player', '#ffb45a', 'player'],
+    ['homography_off', 'U', 'homography misaligned', '#f03c3c'], ['gt_doubt', 'R', 'GT looks wrong here', '#ffe600'], ['unclear', 'Q', 'cannot tell from video', '#9aa0a8']] },
+};
+const TOOL = {};
+for (const cat in SCHEMA) for (const [type, key, label, color, need] of SCHEMA[cat].items) TOOL[key] = { cat, type, label, color, need: need || null, interval: !!SCHEMA[cat].interval };
+const TYPE = Object.fromEntries(Object.values(TOOL).map(t => [t.type, t]));
+const ALIVE = new Set(['controlled', 'flight', 'loose']);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+class AnnotationStore {
+  constructor(storage, key, ds, { undoDepth = 50 } = {}) {
+    this.storage = storage; this.key = key; this.ds = ds; this.undoDepth = undoDepth;
+    this.segments = []; this.points = []; this.layerB = { segments: [], points: [] }; this.bookmarks = []; this.queues = {}; this.rows = null; this.overview = null;
+    this.pending = null; this._undo = [];
+    this._load();
+  }
+  // ---------------- persistence
+  _load() {
+    let raw = null; try { raw = JSON.parse(this.storage.get(this.key) || 'null'); } catch (e) { raw = null; }
+    if (!raw) return;
+    this.segments = raw.segments || []; this.points = raw.points || raw.ann || []; this.bookmarks = raw.bookmarks || [];
+    this.layerB = raw.layerB || { segments: [], points: [] }; this.queues = raw.queues || {}; this.rows = raw.rows ?? null; this.overview = raw.overview ?? null;
+    if (raw.labels && !raw.segments) {                   // old style MINE labels from before, turn them into segments
+      for (const [f, l] of Object.entries(raw.labels)) this.segments.push(l === 'X' ? { f: +f, team: null, state: 'clear' } : l === 'D' ? { f: +f, team: null, state: 'dead' } : { f: +f, team: l, state: 'controlled' });
+      this.segments.sort((a, b) => a.f - b.f); this._save();
+    }
+  }
+  _save() { this.storage.set(this.key, JSON.stringify({ segments: this.segments, points: this.points, bookmarks: this.bookmarks, layerB: this.layerB, queues: this.queues, rows: this.rows, overview: this.overview })); }
+  _snapshot() { this._undo.push(JSON.stringify({ s: this.segments, p: this.points })); if (this._undo.length > this.undoDepth) this._undo.shift(); }
+  undo() { const s = this._undo.pop(); if (!s) return false; const o = JSON.parse(s); this.segments = o.s; this.points = o.p; this._save(); return true; }
+
+  // ---------------- segments (S4)
+  setSegment(f, change) {
+    this._snapshot();
+    const prev = this.segmentAt(f, true);               // look before removing, so a second key on the same frame keeps what was there
+    this.segments = this.segments.filter(s => s.f !== f);
+    if (change === null) this.segments.push({ f, team: null, state: 'clear' });
+    else {
+      let team = change.team !== undefined ? change.team : prev.team;
+      let state = change.state !== undefined ? change.state : (prev.state === 'clear' || prev.state === 'dead' ? 'controlled' : prev.state);
+      if (change.team !== undefined && (prev.state === 'dead' || prev.state === 'clear')) state = 'controlled';
+      if (state === 'dead') team = null;
+      this.segments.push({ f, team, state });
+    }
+    this.segments.sort((a, b) => a.f - b.f); this._save();
+  }
+  segmentAt(r, raw = false, layer = 'A') {
+    const L = layer === 'B' ? this.layerB.segments : this.segments;
+    let best = null; for (const s of L) { if (s.f <= r) best = s; else break; }
+    if (!best) return raw ? { team: null, state: 'clear' } : { team: null, state: 'clear' };
+    return { team: best.team, state: best.state };
+  }
+  derivedLabel(r, layer = 'A') { const s = this.segmentAt(r, false, layer); if (s.state === 'dead') return 'D'; if (ALIVE.has(s.state) && s.team) return s.team; return 'X'; }
+
+  // ---------------- points and intervals (S2)
+  addPoint(f, a) { this._snapshot(); const it = { id: uid(), f, ...a }; this.points.push(it); this.points.sort((p, q) => p.f - q.f); this._save(); return it; }
+  remove(id) { this._snapshot(); this.points = this.points.filter(p => p.id !== id); this._save(); }
+  beginInterval(f, a) { this.pending = { id: uid(), f, ...a }; return this.pending; }
+  endInterval(f2) {
+    if (!this.pending) return null; const p = this.pending; this.pending = null;
+    const a = Math.min(p.f, f2), b = Math.max(p.f, f2); p.f = a; p.f2 = b;
+    this._snapshot(); this.points.push(p); this.points.sort((x, y) => x.f - y.f); this._save(); return p;
+  }
+  discardPending() { this.pending = null; }
+  nudgePending(dxM, dyM) { if (!this.pending || this.pending.x === undefined) return; this.pending.x += dxM / this.ds.pitch[0]; this.pending.y += dyM / this.ds.pitch[1]; }
+  durationS(a) { return ((a.f2 ?? a.f) - a.f + 1) / this.ds.fps; }
+  items(layer = 'A') { return layer === 'B' ? this.layerB.points : this.points; }
+  at(r, layer = 'A') { return this.items(layer).filter(a => a.f <= r && r <= (a.f2 ?? a.f)); }
+  near(r, tolFrames, layer = 'A') { return this.items(layer).filter(a => a.f - tolFrames <= r && r <= (a.f2 ?? a.f) + tolFrames); }
+
+  // ---------------- bookmarks
+  addBookmark(f, note, extra = {}) { this.bookmarks.push({ f, note, ...extra }); this.bookmarks.sort((a, b) => a.f - b.f); this._save(); }
+  removeBookmark(i) { this.bookmarks.splice(i, 1); this._save(); }
+
+  // ---------------- queues (S1) and row filter
+  saveQueue(name, obj) { this.queues[name] = obj; this._save(); }
+  savedQueue(name) { return this.queues[name] || null; }
+  setRows(rows) { this.rows = rows; this._save(); }
+  setOverview(names) { this.overview = names; this._save(); }
+
+  // ---------------- layer B and agreement (S3)
+  importLayer(json, layer = 'B') {
+    const toRel = f => f;                                // frames in a layer file are already relative to the export
+    const segs = (json.segments || []).map(s => ({ f: toRel(s.f), team: s.team ?? null, state: s.state || 'controlled' })).sort((a, b) => a.f - b.f);
+    const pts = (json.annotations || json.points || []).map(a => ({ ...a, id: a.id || uid(), f: toRel(a.f) }));
+    if (layer === 'B') { this.layerB = { segments: segs, points: pts }; }
+    else { this._snapshot(); this.segments = segs; this.points = pts; if (json.bookmarks) this.bookmarks = json.bookmarks; }
+    this._save();
+  }
+  clearLayerB() { this.layerB = { segments: [], points: [] }; this._save(); }
+  agreement(tolFrames = 12) {
+    const n = this.ds.n; let team = 0, state = 0;
+    for (let r = 0; r < n; r++) { const a = this.segmentAt(r, false, 'A'), b = this.segmentAt(r, false, 'B'); if (a.team === b.team) team++; if (a.state === b.state) state++; }
+    const A = this.items('A').filter(p => p.cat !== 'state'), B = this.items('B').filter(p => p.cat !== 'state'); const usedB = new Set(); let matched = 0;
+    for (const a of A) { const j = B.findIndex((b, i) => !usedB.has(i) && b.type === a.type && Math.abs(b.f - a.f) <= tolFrames); if (j >= 0) { usedB.add(j); matched++; } }
+    return { team: team / n, state: state / n, events: { matched, onlyA: A.length - matched, onlyB: B.length - matched } };
+  }
+
+  // ---------------- exports
+  exportJSON(source) {
+    return JSON.stringify({ source, start: this.ds.start, end: this.ds.end, fps: this.ds.fps, frames_are_export_relative: true, schema: SCHEMA,
+      segments: this.segments, annotations: this.points.map(a => ({ ...a, frame: this.ds.start + a.f, frame_end: this.ds.start + (a.f2 ?? a.f) })), bookmarks: this.bookmarks }, null, 1);
+  }
+  exportCSV() {
+    const rows = ['frame_start,frame_end,duration_s,category,type,team,slot_a,slot_b,x,y,ball_x,ball_y,note'];
+    const num = k => this.ds.numOf(k);
+    for (const a of this.points) rows.push([this.ds.start + a.f, this.ds.start + (a.f2 ?? a.f), this.durationS(a).toFixed(2), a.cat, a.type, a.team || '',
+      a.slots ? num(a.slots[0]) : '', a.slots && a.slots[1] !== undefined ? num(a.slots[1]) : '', a.x !== undefined ? a.x.toFixed(4) : '', a.y !== undefined ? a.y.toFixed(4) : '',
+      a.bx !== undefined ? a.bx.toFixed(4) : '', a.by !== undefined ? a.by.toFixed(4) : '', '"' + (a.note || '').replace(/"/g, '""') + '"'].join(','));
+    return rows.join('\n');
+  }
+  // on purpose not the submission format, see rule 1 of the challenge
+  exportHumanReading(source, annotator = 'A') {
+    const rows = ['frame,team,state,derived_label,annotator'];
+    for (let r = 0; r < this.ds.n; r++) { const s = this.segmentAt(r, false, annotator); rows.push(`${this.ds.start + r},${s.team || ''},${s.state === 'clear' ? '' : s.state},${this.derivedLabel(r, annotator)},${annotator}`); }
+    return rows.join('\n');
+  }
+  exportBookmarks() { return 'frame,gt,note\n' + this.bookmarks.map(b => `${this.ds.start + b.f},${b.gt || ''},"${(b.note || '').replace(/"/g, '""')}"`).join('\n'); }
+}
+
+
+// ===== queue.js =====
+// A list of candidate frames, each with a status, so you can work through them and come back later.
+const STATUSES = ['todo', 'done', 'skipped', 'flagged'];
+
+class CandidateQueue {
+  constructor(frames, saved = null) {
+    this.frames = [...frames].sort((a, b) => a - b);
+    this.status = new Map();
+    if (saved) for (const [f, s] of Object.entries(saved)) if (this.frames.includes(+f) && STATUSES.includes(s) && s !== 'todo') this.status.set(+f, s);
+  }
+  statusOf(f) { return this.status.get(f) || 'todo'; }
+  setStatus(f, s) { if (!STATUSES.includes(s)) throw new Error('bad status ' + s); if (s === 'todo') this.status.delete(f); else this.status.set(f, s); }
+  handled(f) { return this.statusOf(f) !== 'todo'; }
+  /** next candidate after/before `cur` (exclusive); skips handled unless includeHandled; wraps. null if none. */
+  next(cur, dir = 1, { includeHandled = false } = {}) {
+    const ok = f => includeHandled || !this.handled(f);
+    const L = this.frames.filter(ok); if (!L.length) return null;
+    if (dir > 0) { const t = L.find(f => f > cur); return t === undefined ? L[0] : t; }
+    const t = [...L].reverse().find(f => f < cur); return t === undefined ? L[L.length - 1] : t;
+  }
+  markAndAdvance(f, s) { this.setStatus(f, s); return this.next(f, 1); }
+  progress() {
+    const p = { done: 0, skipped: 0, flagged: 0, total: this.frames.length, remaining: 0 };
+    for (const f of this.frames) { const s = this.statusOf(f); if (s === 'todo') p.remaining++; else p[s]++; }
+    return p;
+  }
+  serialize() { return Object.fromEntries(this.status); }
+}
+
+
+// ===== timeline.js =====
+// Turns per frame values into a one pixel high strip of RGB bytes, W pixels wide.
+// No canvas involved, so this can be tested in node. They all take (..., r0, r1, W, ...)
+// and give back a Uint8Array of W*3.
+
+const bucket = (r0, r1, W) => { const span = r1 - r0 + 1; return i => [r0 + Math.floor(i * span / W), Math.max(r0 + Math.floor(i * span / W) + 1, r0 + Math.floor((i + 1) * span / W))]; };
+const put = (px, i, c) => { px[i * 3] = c[0]; px[i * 3 + 1] = c[1]; px[i * 3 + 2] = c[2]; };
+
+function rasterLabel(get, r0, r1, W, cmap, bg) {
+  const px = new Uint8Array(W * 3), B = bucket(r0, r1, W);
+  for (let i = 0; i < W; i++) {
+    const [a, b] = B(i); const cnt = new Map();
+    for (let r = a; r < b; r++) { const l = get(r) || ''; cnt.set(l, (cnt.get(l) || 0) + 1); }
+    let best = '', bc = -1; for (const [l, c] of cnt) if (c > bc) { bc = c; best = l; }
+    put(px, i, best && best !== 'X' && cmap[best] ? cmap[best] : bg);
+  }
+  return px;
+}
+function rasterMask(get, r0, r1, W, color, bg) {
+  const px = new Uint8Array(W * 3), B = bucket(r0, r1, W);
+  for (let i = 0; i < W; i++) { const [a, b] = B(i); let on = false; for (let r = a; r < b; r++) if (get(r)) { on = true; break; } put(px, i, on ? color : bg); }
+  return px;
+}
+function rasterIntensity(get, r0, r1, W, vmax, color, bg, { bad = null, badColor = [240, 60, 60] } = {}) {
+  const px = new Uint8Array(W * 3), B = bucket(r0, r1, W);
+  for (let i = 0; i < W; i++) {
+    const [a, b] = B(i); let v = -1;
+    for (let r = a; r < b; r++) { const x = get(r); if (Number.isFinite(x) && x > v) v = x; }
+    if (v < 0) { put(px, i, bg); continue; }
+    if (bad !== null && v > bad) { put(px, i, badColor); continue; }
+    const k = Math.min(1, v / vmax); put(px, i, [bg[0] + (color[0] - bg[0]) * k, bg[1] + (color[1] - bg[1]) * k, bg[2] + (color[2] - bg[2]) * k]);
+  }
+  return px;
+}
+function rasterCategorical(get, r0, r1, W, bg) {
+  // get(r) gives a colour or null, the first colour inside a pixel wins
+  const px = new Uint8Array(W * 3), B = bucket(r0, r1, W);
+  for (let i = 0; i < W; i++) { const [a, b] = B(i); let c = null; for (let r = a; r < b; r++) { c = get(r); if (c) break; } put(px, i, c || bg); }
+  return px;
+}
+function rasterInterval(items, r0, r1, W, bg) {
+  // items look like {f, f2, color}; the whole span gets painted
+  const px = new Uint8Array(W * 3); for (let i = 0; i < W; i++) put(px, i, bg);
+  const span = r1 - r0 + 1;
+  for (const it of items) {
+    const a = Math.max(it.f, r0), b = Math.min(it.f2 ?? it.f, r1); if (b < a) continue;
+    const i0 = Math.floor((a - r0) / span * W), i1 = Math.max(i0, Math.floor((b - r0) / span * W));
+    for (let i = i0; i <= Math.min(W - 1, i1); i++) put(px, i, it.color);
+  }
+  return px;
+}
+function rasterSlot(runs, jumps, r0, r1, W, presentColor, jumpColor, bg) {
+  const px = rasterInterval(runs.filter(x => x.present).map(x => ({ f: x.a, f2: x.b, color: presentColor })), r0, r1, W, bg);
+  const span = r1 - r0 + 1;
+  for (const j of jumps) if (j >= r0 && j <= r1) { const i = Math.floor((j - r0) / span * W); put(px, i, jumpColor); if (i + 1 < W) put(px, i + 1, jumpColor); }
+  return px;
+}
+// How many players are usually tracked in this export, the most common count.
+function usualCount(counts) {
+  const freq = new Map(); for (const c of counts) freq.set(c, (freq.get(c) || 0) + 1);
+  let best = 0, bc = -1; for (const [c, f] of freq) if (f > bc) { bc = f; best = c; } return best;
+}
+// Per bin summaries over the whole export for the overview bands.
+// restarts and kicks are counts, everything else is a fraction of the bin.
+function aggregateBands(ds, events, poss, binFrames) {
+  const out = []; const n = ds.n, m = ds.meta;
+  const usual = m.count ? usualCount(m.count) : 22;
+  for (let a = 0; a < n; a += binFrames) {
+    const b = Math.min(n, a + binFrames); let lost = 0, h = 0, aa = 0, cnt = 0, hom = 0;
+    for (let r = a; r < b; r++) {
+      if (!ds.ball(r)) lost++;
+      if (poss.lh[r] === 'H') h++; else if (poss.lh[r] === 'A') aa++;
+      if (m.count && m.count[r] !== usual) cnt++;
+      if (m.hom_err && (m.hom_err[r] < 0 || m.hom_err[r] > 3)) hom++;
+    }
+    const len = b - a;
+    out.push({ a, b: b - 1, len,
+      restarts: events.restartFrames.filter(r => r >= a && r < b).length,
+      kicks: [...events.kick].filter(r => r >= a && r < b).length,
+      lostFrac: lost / len, shareH: h / len, shareA: aa / len, countBad: cnt / len, homBad: hom / len });
+  }
+  return out;
+}
+
+
+// ===== slots.js =====
+// For each track slot: when it was present, when it was gone, and where it jumped.
+function slotRuns(ds) {
+  const out = []; out.jumps = [];
+  for (let k = 0; k < ds.S; k++) {
+    const runs = []; let cur = null;
+    for (let r = 0; r < ds.n; r++) {
+      const p = ds.present(r, k);
+      if (!cur || cur.present !== p) { cur = { a: r, b: r, present: p }; runs.push(cur); } else cur.b = r;
+    }
+    out.push(runs); out.jumps.push([]);
+  }
+  for (const [r, k] of ds.meta.events.pjump) out.jumps[k].push(r);
+  return out;
+}
+/** slot order for a view: home first then away, in slot order; slots with no presence in [r0, r1] last */
+function orderSlots(runs, r0, r1) {
+  const S = runs.length, seen = k => runs[k].some(x => x.present && x.b >= r0 && x.a <= r1);
+  const idx = [...Array(S).keys()];
+  const team = runs.team || (k => (k < S / 2 ? 'H' : 'A'));
+  const key = k => (seen(k) ? 0 : 1) * 1000 + (team(k) === 'H' ? 0 : 500) + k;
+  return idx.sort((a, b) => key(a) - key(b));
+}
+
+
+// ===== app.js =====
+// app.js is the only file that knows about the page. It wires the modules together,
+// draws on the two canvases and handles the keyboard. No analysis lives here.
+
+const $ = s => document.querySelector(s);
+const q = new URLSearchParams(location.search);
+const C = getComputedStyle(document.documentElement);
+const col = n => C.getPropertyValue('--' + n).trim();
+const hex = h => { const v = parseInt(h.slice(1), 16); return [v >> 16 & 255, v >> 8 & 255, v & 255]; };
+const TEAM = { H: col('home'), A: col('away'), D: col('dead'), X: col('none'), '': col('none'), '?': '#888' };
+const TEAM3 = Object.fromEntries(Object.entries(TEAM).map(([k, v]) => [k, hex(v)]));
+const BG3 = [34, 34, 34];
+const rgb = a => `rgb(${a[2]},${a[1]},${a[0]})`;            // exporter colours are BGR
+const fmt = v => Number.isFinite(v) ? v.toFixed(1) : 'n/a';
+const lighten = (c, k) => c.map(v => Math.round(v + (255 - v) * k));
+const STATE_SHADE = { controlled: 0, flight: 0.45, loose: 0.25, dead: null };
+
+// ---------------------------------------------------------------- state
+let ds, E, P, store, queue, exportDir;
+let cur = 0, pinned = [], hover = null, layers = {}, view = [0, 0];
+let armed = null, pendingClicks = [], magnify = false, loop = null;
+let candFrames = [], candType = 'gt_vs_lh', includeHandled = false;
+let ROWS = [], rowCache = new Map(), tlDrag = null, slotsOpen = false;
+const RH = 11, RG = 2, GG = 9, OVH = 10, BANDH = 7, FLAG = 14;
+// Things that can show up in the overview at the top of the timeline. GT always comes first.
+// A strip just reuses one of the rows, a band is a per bin summary from aggregateBands.
+const OVERVIEW_ITEMS = [
+  { name: 'GT', kind: 'strip', row: 'GT' }, { name: 'PRED', kind: 'strip', row: 'PRED' }, { name: 'L&H', kind: 'strip', row: 'L&H' }, { name: 'SEGMENT', kind: 'strip', row: 'SEGMENT' },
+  { name: 'restarts', kind: 'band', key: 'restarts', count: true, color: 'good' }, { name: 'kicks', kind: 'band', key: 'kicks', count: true, color: 'kick' },
+  { name: 'ball lost', kind: 'band', key: 'lostFrac', color: 'lost' }, { name: 'L&H share', kind: 'band', key: 'share' },
+  { name: 'player count off', kind: 'band', key: 'countBad', color: 'warn' }, { name: 'homography bad', kind: 'band', key: 'homBad', color: 'bad' },
+];
+const OVERVIEW_DEFAULT = ['GT', 'restarts', 'ball lost', 'L&H share'];
+
+const LAYERS = [
+  ['pitch', 'pitch lines', true], ['players', 'players', true], ['holder', 'L&H holder disc', true], ['ring', 'possession ring', true],
+  ['ball', 'ball', true], ['trail', 'ball trail (1.5 s)', true], ['future', 'ball future (1 s)', true], ['opp', 'closest opponent line', true],
+  ['events', 'event marks (kick / jump / vanish)', true], ['ann', 'annotation marks', true], ['regions', 'dominant regions', false], ['hull', 'team hulls', false],
+  ['arrows', 'attack direction', true], ['labels', 'slot numbers', true],
+];
+const LAYER_PRESETS = { 'everything': null, 'players + ball': ['pitch', 'players', 'ball', 'labels'], 'clean video': [] };
+const ROW_PRESETS = {
+  'all': null,
+  'possession': ['GT', 'PRED', 'NAIVE', 'L&H', 'SEGMENT', 'MINE', 'RESTART', 'KICK'],
+  'events': ['GT', 'RESTART', 'KICK', 'ANN EVENTS', 'BOOKMARK'],
+  'data quality': ['GT', 'BALL LOST', 'BALL JUMP', 'PLAYER JUMP', 'DROPOUT <0.5 s', 'VANISH/APPEAR', 'COUNT ≠ 22', '› BOLT', 'HOMOGRAPHY', 'ANN DATA'],
+  'annotation': ['GT', 'SEGMENT', 'MINE', 'ANN EVENTS', 'ANN DATA', 'SEGMENT B', 'ANN B', 'BOOKMARK'],
+  'minimal': ['GT', 'L&H', 'RESTART', 'BALL LOST'],
+};
+
+// ---------------------------------------------------------------- boot
+async function load() {
+  exportDir = q.get('d');
+  if (!exportDir) { try { exportDir = (await (await fetch('export/latest.json')).json()).dir; } catch (e) { exportDir = 'export/tactical_gt'; } }
+  $('#srcName').textContent = 'loading ' + exportDir + ' …';
+  const meta = await (await fetch(exportDir + '/meta.json')).json();
+  const buf = await (await fetch(exportDir + '/data.bin')).arrayBuffer();
+  ds = new DataSet(meta, new Float32Array(buf));
+  E = deriveEvents(ds);
+  store = new AnnotationStore({ get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } }, 'pv2:' + exportDir, ds);
+  $('#srcName').textContent = `${meta.source} · frames ${meta.start}-${meta.end} · ${(ds.n / ds.fps / 60).toFixed(1)} min`;
+  document.title = `Match viewer · ${meta.source}`;
+  const v = $('#v'); v.src = meta.video;
+  v.addEventListener('loadedmetadata', init, { once: true });
+}
+
+function init() {
+  const v = $('#v'), ov = $('#ov');
+  ov.width = v.videoWidth; ov.height = v.videoHeight;
+  P = computePossession(ds, E.kick, +$('#rad').value);
+  view = [0, ds.n - 1];
+  buildLayers(); buildPalette(); buildLegend(); buildRows(); setupTimeline(); setupRowFilter(); setupOverviewFilter(); setupHelp();
+  buildCandidates(); renderBookmarks(); renderAnn(); renderAgreement();
+  fit(); new ResizeObserver(fit).observe($('#stage')); window.addEventListener('resize', fit); setTimeout(fit, 300);
+  if ('requestVideoFrameCallback' in v) { const cb = (now, md) => { onTime(md.mediaTime); v.requestVideoFrameCallback(cb); }; v.requestVideoFrameCallback(cb); }
+  else v.addEventListener('timeupdate', () => onTime(v.currentTime));
+  v.addEventListener('seeked', () => onTime(v.currentTime));
+  v.addEventListener('play', () => $('#bPlay').textContent = '❚❚ pause'); v.addEventListener('pause', () => $('#bPlay').textContent = '▶ play');
+  $('#bPlay').onclick = togglePlay; $('#speed').onchange = e => v.playbackRate = +e.target.value;
+  $('#rad').oninput = e => { $('#radV').textContent = (+e.target.value).toFixed(1) + ' m'; P = computePossession(ds, E.kick, +e.target.value); rowCache.clear(); buildCandidates(); draw(); drawTimeline(); };
+  $('#bPrev').onclick = () => stepEvent(-1); $('#bNext').onclick = () => stepEvent(1);
+  $('#candType').onchange = e => { candType = e.target.value; buildCandidates(); };
+  $('#inclHandled').onchange = e => { includeHandled = e.target.checked; };
+  $('#bAdd').onclick = addBookmark; $('#bExpB').onclick = () => download(`bookmarks_${ds.meta.source}.csv`, store.exportBookmarks());
+  $('#bExpHR').onclick = () => download(`human_reading_${ds.meta.source}_${ds.start}-${ds.end}.csv`, store.exportHumanReading(ds.meta.source));
+  $('#bExpA').onclick = () => download(`annotations_${ds.meta.source}_${ds.start}-${ds.end}.json`, store.exportJSON(ds.meta.source));
+  $('#bExpAC').onclick = () => download(`annotations_${ds.meta.source}_${ds.start}-${ds.end}.csv`, store.exportCSV());
+  $('#impA').onchange = importAnn; $('#bClearB').onclick = () => { store.clearLayerB(); rowCache.clear(); renderAgreement(); drawTimeline(); draw(); };
+  $('#bClr').onclick = () => { if (confirm('clear my annotations, segments and bookmarks for this export?')) { store.segments = []; store.points = []; store.bookmarks = []; store._save(); rowCache.clear(); renderAll(); } };
+  $('#annFilter').onchange = renderAnn;
+  $('#note').addEventListener('input', noteIndicator);
+  ov.addEventListener('mousemove', onPitchHover); ov.addEventListener('mouseleave', () => { hover = null; $('#tip').style.display = 'none'; $('#mag').style.display = 'none'; draw(); });
+  ov.addEventListener('click', onPitchClick);
+  document.addEventListener('keydown', onKey);
+  seek(0);
+}
+function renderAll() { buildRows(); buildCandidates(); renderBookmarks(); renderAnn(); renderAgreement(); drawTimeline(); draw(); updateInfo(); }
+
+function fit() {
+  const st = $('#stage'), v = $('#v'), ov = $('#ov'), wrap = $('#wrap'); if (!v.videoWidth) return;
+  const ar = v.videoWidth / v.videoHeight, sw = st.clientWidth - 8, sh = st.clientHeight - 8;
+  let w = sw, h = w / ar; if (h > sh) { h = sh; w = h * ar; } w = Math.floor(w); h = Math.floor(h);
+  wrap.style.width = v.style.width = ov.style.width = w + 'px'; wrap.style.height = v.style.height = ov.style.height = h + 'px';
+  draw();
+}
+
+// ---------------------------------------------------------------- navigation
+const frameToTime = r => (ds.start + r + 0.5) / ds.fps;
+function onTime(t) {
+  const r = Math.max(0, Math.min(ds.n - 1, Math.floor(t * ds.fps) - ds.start));
+  if (loop && r > loop[1]) { $('#v').currentTime = frameToTime(loop[0]); return; }
+  cur = r; draw(); drawTimeline(); updateInfo();
+}
+function seek(r) { r = Math.max(0, Math.min(ds.n - 1, r)); $('#v').currentTime = frameToTime(r); cur = r; draw(); drawTimeline(); updateInfo(); }
+function togglePlay() { const v = $('#v'); v.paused ? v.play() : v.pause(); }
+function stepEvent(dir) {
+  const type = $('#stepType').value;
+  if (type === 'cand') { const t = queue.next(cur, dir, { includeHandled }); if (t !== null) seek(t); return; }
+  const L = E.list(type); if (!L.length) return;
+  let t = dir > 0 ? L.find(r => r > cur) : [...L].reverse().find(r => r < cur);
+  if (t === undefined) t = dir > 0 ? L[0] : L[L.length - 1]; seek(t);
+}
+function toggleLoop() { if (loop) { loop = null; } else { loop = [Math.max(0, cur - 2 * ds.fps), cur]; seek(loop[0]); $('#v').play(); } $('#loopInd').textContent = loop ? `loop ${ds.start + loop[0]}-${ds.start + loop[1]}` : ''; }
+
+function onKey(e) {
+  const tag = e.target.tagName; const inNote = e.target.id === 'note';
+  if (inNote && e.key === 'Escape') { e.target.value = ''; noteIndicator(); e.target.blur(); return; }
+  if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT') return;
+  const v = $('#v'), step = e.shiftKey ? Math.round(ds.fps) : 1, K = e.key;
+  if ((e.ctrlKey || e.metaKey) && K.toLowerCase() === 'z') { e.preventDefault(); if (store.undo()) { rowCache.clear(); renderAll(); } return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  // if a tool is armed or an interval is open, those keys win
+  if (store.pending || armed) {
+    if (K === 'Escape') { cancelTool(); return; }
+    if (K === 'Enter') { if (store.pending && readyToClose()) { closePending(); } return; }
+    if (store.pending && store.pending.x !== undefined && K.startsWith('Arrow')) { e.preventDefault(); const d = e.shiftKey ? 0.5 : 0.1; store.nudgePending(K === 'ArrowRight' ? d : K === 'ArrowLeft' ? -d : 0, K === 'ArrowDown' ? d : K === 'ArrowUp' ? -d : 0); draw(); return; }
+    if (armed && armed.need === 'pitch+team' && pendingClicks.length === 1 && 'hHaA'.includes(K)) { finishTool({ team: K.toUpperCase() }); return; }
+    if (store.pending && TOOL[K.toUpperCase()] && TOOL[K.toUpperCase()].type === store.pending.type) { closePending(); return; }
+  }
+  if (K === ' ') { e.preventDefault(); togglePlay(); }
+  else if (K === 'ArrowRight') { e.preventDefault(); v.pause(); seek(cur + step); }
+  else if (K === 'ArrowLeft') { e.preventDefault(); v.pause(); seek(cur - step); }
+  else if (K === ',') stepEvent(-1); else if (K === '.') stepEvent(1);
+  else if (K === '[' || K === ']') { const s = $('#speed'); s.selectedIndex = Math.max(0, Math.min(s.options.length - 1, s.selectedIndex + (K === ']' ? 1 : -1))); v.playbackRate = +s.value; }
+  else if (K === 'b' || K === 'B') addBookmark();
+  else if (K === 'Enter') { markCandidate('done'); } else if (K === 'Backspace') { e.preventDefault(); markCandidate('skipped'); } else if (K === '!') markCandidate('flagged');
+  else if (K === 'h' || K === 'H') setSeg({ team: 'H' }); else if (K === 'a' || K === 'A') setSeg({ team: 'A' });
+  else if (K === 'd' || K === 'D' || K === '4') setSeg({ state: 'dead' }); else if (K === 'x' || K === 'X' || K === '0') setSeg(null);
+  else if (K === '1') setSeg({ state: 'controlled' }); else if (K === '2') setSeg({ state: 'flight' }); else if (K === '3') setSeg({ state: 'loose' });
+  else if (K === 'z' || K === 'Z') { magnify = !magnify; $('#mag').style.display = magnify ? 'block' : 'none'; }
+  else if (K === 'l' || K === 'L') toggleLoop();
+  else if (K === '?') toggleHelp();
+  else if (K === 'Escape') { if ($('#help').style.display === 'block') toggleHelp(); else { view = [0, ds.n - 1]; pinned = []; loop = null; $('#loopInd').textContent = ''; renderPinned(); drawTimeline(); draw(); } }
+  else if (K === 'Home') seek(0); else if (K === 'End') seek(ds.n - 1);
+  else if (TOOL[K.toUpperCase()] && TOOL[K.toUpperCase()].cat !== 'state') arm(K.toUpperCase());
+}
+
+// ---------------------------------------------------------------- segments (S4)
+function setSeg(change) { store.setSegment(cur, change); rowCache.clear(); drawTimeline(); draw(); updateInfo(); }
+
+// ---------------------------------------------------------------- tools, intervals (S2, S5)
+function arm(key) {
+  const t = TOOL[key]; if (!t) return;
+  $('#v').pause();
+  if (t.cat === 'event') { takeNote(store.addPoint(cur, { cat: 'event', type: t.type, ...ballPos() })); rowCache.clear(); renderAnn(); drawTimeline(); draw(); return; }
+  if (!t.need) { store.beginInterval(cur, { cat: t.cat, type: t.type }); armed = null; showPending(); return; }
+  if (t.type === 'ball_pos') { const b = ds.ball(cur); if (b) { store.beginInterval(cur, { cat: t.cat, type: t.type, x: b.x, y: b.y, bx: b.x, by: b.y }); armed = null; $('#armed').textContent = 'true ball position: placed at the tracked ball. Arrows nudge 10 cm (Shift 50 cm), click to move, N or Enter to close'; draw(); return; } }
+  armed = t; pendingClicks = [];
+  $('#armed').textContent = t.need === 'pitch' ? `${t.label}: click the spot on the pitch` : t.need === 'pitch+team' ? `${t.label}: click the spot, then press H or A` : t.need === 'player2' ? `${t.label}: click the two markers` : `${t.label}: click the marker`;
+  paletteState();
+}
+function ballPos() { const b = ds.ball(cur); return b ? { bx: b.x, by: b.y } : {}; }
+function takeNote(a) { const n = $('#note').value.trim(); if (n) { a.note = n; $('#note').value = ''; noteIndicator(); store._save(); } return a; }
+function readyToClose() { const p = store.pending; return !!p && !(armed); }
+function showPending() { const p = store.pending; $('#armed').textContent = p ? `${TYPE[p.type].label}: open since frame ${ds.start + p.f}. Press ${keyOf(p.type)} or Enter to close, Esc to discard` : ''; paletteState(); drawTimeline(); draw(); }
+function keyOf(type) { return Object.keys(TOOL).find(k => TOOL[k].type === type); }
+function closePending() { const p = store.endInterval(cur); if (p) takeNote(p); $('#armed').textContent = ''; rowCache.clear(); paletteState(); renderAnn(); drawTimeline(); draw(); }
+function cancelTool() { armed = null; pendingClicks = []; store.discardPending(); $('#armed').textContent = ''; paletteState(); drawTimeline(); draw(); }
+function paletteState() { document.querySelectorAll('.tool').forEach(el => el.classList.toggle('armed', (armed && el.dataset.key === keyOf(armed.type)) || (store.pending && el.dataset.key === keyOf(store.pending.type)))); }
+function toolClick(e) {
+  const [px, py] = pitchXY(e);
+  if (store.pending && store.pending.x !== undefined && !armed) { const p = ds.pitchFromPx(cur, px, py); if (p) { store.pending.x = p.x; store.pending.y = p.y; draw(); } return; }
+  if (!armed) return;
+  if (armed.need === 'pitch' || armed.need === 'pitch+team') {
+    const p = ds.pitchFromPx(cur, px, py); if (!p) { $('#armed').textContent = 'no homography on this frame, cannot place'; return; }
+    pendingClicks = [p]; if (armed.need === 'pitch') finishTool({ x: p.x, y: p.y }); else { $('#armed').textContent = `${armed.label}: now press H (Barcelona) or A (Athletic)`; draw(); } return;
+  }
+  const h = nearestHit(e); if (!h) return;
+  pendingClicks.push(h.k);
+  if (armed.need === 'player' || pendingClicks.length === 2) finishTool({ slots: pendingClicks.slice() }); else $('#armed').textContent = `${armed.label}: click the second marker`;
+}
+function finishTool(extra) {
+  const a = { cat: armed.cat, type: armed.type, ...extra, ...ballPos() };
+  if (pendingClicks.length && pendingClicks[0].x !== undefined) { a.x = pendingClicks[0].x; a.y = pendingClicks[0].y; }
+  store.beginInterval(cur, a); armed = null; pendingClicks = []; showPending();
+}
+
+// ---------------------------------------------------------------- candidates and queue (S1)
+function segmentStarts(pred) { const out = []; let prev = false; for (let r = 0; r < ds.n; r++) { const c = pred(r); if (c && !prev) out.push(r); prev = c; } return out; }
+function candidateList(t) {
+  const gt = r => ds.gt(r), alive = r => gt(r) === 'H' || gt(r) === 'A', tp = +$('#rad').value;
+  const ringCount = r => { const b = ds.ball(r); if (!b) return -1; let n = 0; for (const p of ds.players(r)) if (ds.metres(b, p) <= tp) n++; return n; };
+  const L = {
+    gt_vs_lh: () => ds.meta.gt ? segmentStarts(r => alive(r) && P.lh[r] && P.lh[r] !== gt(r)) : [],
+    gt_vs_pred: () => (ds.meta.gt && ds.meta.pred) ? segmentStarts(r => gt(r) !== 'X' && ds.pred(r) !== gt(r)) : [],
+    gt_change: () => E.gtChanges, restart: () => E.restartFrames, kick: () => E.list('kick'), lost: () => E.lostStarts, jump: () => E.jumpFrames, churn: () => E.churnFrames,
+    ambig: () => segmentStarts(r => alive(r) && ringCount(r) !== -1 && ringCount(r) !== 1),
+  };
+  const label = {
+    gt_vs_lh: r => `GT ${gt(r)} · L&H ${P.lh[r]}`, gt_vs_pred: r => `GT ${gt(r)} · pred ${ds.pred(r)}`, gt_change: r => `${gt(r - 1)} → ${gt(r)}`,
+    restart: r => { const f = E.flags.find(x => x.r === r); return f ? f.name : 'GT dead → alive'; }, kick: r => `ball ${ds.ball(r) ? ds.ball(r).sf.toFixed(0) : '?'} m/s`,
+    lost: r => { let e = r; while (e < ds.n && !ds.ball(e)) e++; return `${((e - r) / ds.fps).toFixed(1)} s`; },
+    jump: r => { const b = ds.meta.events.bjump.find(e => e[0] === r); if (b) return `ball ${b[1].toFixed(1)} m`; const p = ds.meta.events.pjump.find(e => e[0] === r); return p ? `#${ds.numOf(p[1])} ${p[2].toFixed(1)} m` : ''; },
+    churn: r => [...ds.meta.events.vanish.filter(e => e[0] === r).map(e => 'lost #' + ds.numOf(e[1])), ...ds.meta.events.appear.filter(e => e[0] === r).map(e => 'new #' + ds.numOf(e[1]))].join(', '),
+    ambig: r => `${ringCount(r)} within ${tp} m`,
+  };
+  return { frames: (L[t] || (() => []))(), label: label[t] || (() => '') };
+}
+function buildCandidates() {
+  const { frames, label } = candidateList(candType); candFrames = frames;
+  queue = new CandidateQueue(frames, store.savedQueue(candType));
+  const el = $('#cands'); el.innerHTML = '';
+  for (const r of frames.slice(0, 600)) {
+    const d = document.createElement('div'); d.className = 'ev'; d.dataset.r = r;
+    d.innerHTML = `<span class="st"></span><span class="f mono">${ds.start + r}</span><span class="t">${label(r)}</span>`;
+    d.onclick = () => seek(r); el.appendChild(d);
+  }
+  renderQueue(); drawTimeline();
+}
+function renderQueue() {
+  const p = queue.progress();
+  $('#candN').textContent = `done ${p.done} · skipped ${p.skipped} · flagged ${p.flagged} · ${p.total} total`;
+  for (const d of $('#cands').children) { const s = queue.statusOf(+d.dataset.r); d.querySelector('.st').className = 'st ' + s; d.querySelector('.st').textContent = s === 'done' ? '✓' : s === 'skipped' ? '›' : s === 'flagged' ? '!' : ''; d.classList.toggle('cur', +d.dataset.r === cur); }
+}
+function markCandidate(status) {
+  if (!candFrames.length) return;
+  const f = candFrames.includes(cur) ? cur : queue.next(cur, -1, { includeHandled: true });
+  if (f === null) return;
+  const nxt = queue.markAndAdvance(f, status); store.saveQueue(candType, queue.serialize()); renderQueue();
+  if (nxt !== null) seek(nxt);
+}
+
+// ---------------------------------------------------------------- bookmarks, notes
+function addBookmark() { store.addBookmark(cur, $('#note').value.trim(), { gt: ds.gt(cur) || '', lh: P.lh[cur] }); $('#note').value = ''; noteIndicator(); rowCache.clear(); renderBookmarks(); drawTimeline(); }
+function renderBookmarks() {
+  const el = $('#bms'); el.innerHTML = '';
+  store.bookmarks.forEach((b, i) => {
+    const d = document.createElement('div'); d.className = 'ev';
+    d.innerHTML = `<span class="pill" style="background:${TEAM[b.gt] || '#888'}">${b.gt || '-'}</span><span class="t">${b.note || '<span class="hint">no note</span>'}</span><span class="f mono">${ds.start + b.f}</span><span class="f" title="remove">✕</span>`;
+    d.querySelector('.t').onclick = () => seek(b.f); d.lastElementChild.onclick = () => { store.removeBookmark(i); rowCache.clear(); renderBookmarks(); drawTimeline(); };
+    el.appendChild(d);
+  });
+}
+function noteIndicator() { const n = $('#note').value.trim(); $('#noteInd').textContent = n ? 'attached to the next annotation or bookmark (Esc clears)' : ''; }
+function download(name, text) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' })); a.download = name; a.click(); }
+
+// ---------------------------------------------------------------- annotations list, import, agreement (S3)
+const annColor = a => (TYPE[a.type] || {}).color || '#fff', annLabel = a => (TYPE[a.type] || {}).label || a.type;
+function renderAnn() {
+  const f = $('#annFilter').value; const L = store.items('A').filter(a => !f || a.cat === f);
+  $('#annN').textContent = `(${L.length})`; const el = $('#annList'); el.innerHTML = '';
+  for (const a of L) {
+    const d = document.createElement('div'); d.className = 'ev' + (a.f <= cur && cur <= (a.f2 ?? a.f) ? ' cur' : '');
+    const span = a.f2 !== undefined && a.f2 !== a.f ? ` <span class="hint">${store.durationS(a).toFixed(1)} s</span>` : '';
+    const extra = [a.team ? (a.team === 'H' ? 'BAR' : 'ATH') : '', a.slots ? a.slots.map(k => '#' + ds.numOf(k)).join(' ↔ ') : '', a.x !== undefined ? `(${a.x.toFixed(3)}, ${a.y.toFixed(3)})` : ''].filter(Boolean).join(' ');
+    d.innerHTML = `<span class="g" style="background:${annColor(a)};border-radius:2px"></span><span class="t">${annLabel(a)}${span}${extra ? ' <span class="hint">' + extra + '</span>' : ''}${a.note ? '<div class="hint">' + a.note + '</div>' : ''}</span><span class="f mono">${ds.start + a.f}</span><span class="f" title="remove">✕</span>`;
+    d.querySelector('.t').onclick = () => seek(a.f); d.lastElementChild.onclick = () => { store.remove(a.id); rowCache.clear(); renderAnn(); drawTimeline(); draw(); };
+    el.appendChild(d);
+  }
+}
+function importAnn(e) {
+  const fl = e.target.files[0]; if (!fl) return; const rd = new FileReader();
+  rd.onload = () => { try { const j = JSON.parse(rd.result); const asB = confirm('OK = load as layer B (second annotator, read-only)\nCancel = replace my annotations'); store.importLayer(j, asB ? 'B' : 'A'); rowCache.clear(); renderAll(); } catch (err) { alert('could not read: ' + err); } };
+  rd.readAsText(fl); e.target.value = '';
+}
+function renderAgreement() {
+  const el = $('#agree'); if (!store.layerB.points.length && !store.layerB.segments.length) { el.innerHTML = '<span class="hint">import a second annotator\'s JSON as layer B to compare</span>'; return; }
+  const ag = store.agreement(12);
+  el.innerHTML = `<div class="row"><span class="k">team agreement</span><span class="v">${(100 * ag.team).toFixed(1)} %</span></div><div class="row"><span class="k">state agreement</span><span class="v">${(100 * ag.state).toFixed(1)} %</span></div><div class="row"><span class="k">events matched ±0.5 s</span><span class="v">${ag.events.matched} · only A ${ag.events.onlyA} · only B ${ag.events.onlyB}</span></div>`;
+}
+
+// ---------------------------------------------------------------- palette, layers, legend, help
+function buildPalette() {
+  for (const [cat, id] of [['state', '#palState'], ['event', '#palEvent'], ['data', '#palData']]) {
+    const el = $(id); el.innerHTML = '';
+    for (const [type, key, label, color] of SCHEMA[cat].items) {
+      const d = document.createElement('div'); d.className = 'tool'; d.dataset.key = key; d.innerHTML = `<span class="sw" style="background:${color}"></span>${label}<kbd>${key}</kbd>`;
+      d.onclick = () => { if (cat === 'state') onKey({ key, target: document.body, preventDefault() {} }); else if (store.pending && store.pending.type === type) closePending(); else arm(key); };
+      el.appendChild(d);
+    }
+  }
+}
+function buildLayers() {
+  const L = $('#layers'); L.innerHTML = '';
+  const pr = document.createElement('div'); pr.className = 'presets';
+  for (const name in LAYER_PRESETS) { const b = document.createElement('button'); b.textContent = name; b.onclick = () => { const set = LAYER_PRESETS[name]; for (const [k, , on] of LAYERS) layers[k] = set === null ? on : set.includes(k); L.querySelectorAll('input').forEach(i => i.checked = layers[i.dataset.k]); draw(); }; pr.appendChild(b); }
+  L.appendChild(pr);
+  for (const [k, name, on] of LAYERS) { layers[k] = on; const el = document.createElement('label'); el.className = 'chk'; el.innerHTML = `<input type="checkbox" data-k="${k}" ${on ? 'checked' : ''}> ${name}`; el.querySelector('input').onchange = e => { layers[k] = e.target.checked; draw(); }; L.appendChild(el); }
+}
+const RESTART_GLYPHS = { 'Throw-In': ['diamond', col('throw')], 'Corner': ['circle', col('corner')], 'Goal Kick': ['square', col('goalkick')], 'Free Kick': ['tri_down', col('freekick')], 'Kick-Off': ['star', col('kickoff')] };
+function buildLegend() {
+  const el = $('#legend'); el.innerHTML = '';
+  const items = [['tri_up', col('good'), 'GT dead → alive', 'RESTART'], ...Object.entries(RESTART_GLYPHS).map(([n, [g, c]]) => [g, c, n.toLowerCase(), 'RESTART']), ['pin', '#fff', 'bookmark', 'BOOKMARK'],
+    [null, col('kick'), 'kick', 'KICK'], [null, col('lost'), 'ball lost', 'BALL LOST'], [null, col('jump'), 'teleport', 'PLAYER JUMP'], [null, col('churn'), 'vanish / appear', 'VANISH/APPEAR'], [null, col('bolt'), `› Bolt ${ds.meta.bolt} m/s`, '› BOLT'], [null, TEAM.H, 'Barcelona', 'GT'], [null, TEAM.A, 'Athletic', 'GT'], [null, TEAM.D, 'dead ball', 'GT']];
+  for (const [k, c, t, row] of items) { if (row && !rowVisible(row)) continue; const s = document.createElement('span'); const cv = document.createElement('canvas'); cv.width = cv.height = 24; const g = cv.getContext('2d'); g.scale(2, 2); if (k) glyph(g, k, 6, 6, 4.5, c); else { g.fillStyle = c; g.fillRect(2, 3, 8, 6); } s.appendChild(cv); s.append(t); el.appendChild(s); }
+}
+function setupHelp() {
+  const rows = [['space', 'play / pause'], ['← →', 'one frame'], ['⇧ + ← →', 'one second'], [', .', 'previous / next event (type in the timeline bar)'], ['[ ]', 'slower / faster'], ['Home End', 'start / end'],
+    ['Enter', 'candidate done, go to next'], ['Backspace', 'candidate skipped'], ['!', 'candidate flagged'], ['H A', 'segment: team from here'], ['1 2 3', 'segment state: controlled / flight / loose'], ['D or 4', 'segment: dead ball'], ['X or 0', 'segment: clear from here'],
+    ['P S T I C J F O K', 'event at this frame'], ['N M G W V Y U R Q', 'data error: opens an interval; same key or Enter closes; Esc discards'], ['arrows while placing', 'nudge 10 cm (⇧ 50 cm)'], ['Z', 'magnifier'], ['L', 'loop the last 2 s'], ['B', 'bookmark with the note'],
+    ['Ctrl+Z', 'undo'], ['Esc', 'cancel tool / reset zoom and pins / close help'], ['?', 'this help'], ['click player', 'pin (⇧-click two: distance)'], ['timeline', 'click = seek · drag = zoom · wheel = zoom at cursor'], ['slot row label', 'pin that slot']];
+  $('#helpBody').innerHTML = rows.map(([k, d]) => `<div class="row"><span class="k"><kbd>${k}</kbd></span><span class="v">${d}</span></div>`).join('');
+  $('#bHelp').onclick = toggleHelp; $('#help').onclick = e => { if (e.target.id === 'help') toggleHelp(); };
+}
+function toggleHelp() { const h = $('#help'); h.style.display = h.style.display === 'block' ? 'none' : 'block'; }
+
+// ---------------------------------------------------------------- pitch overlay
+const PITCH_LINES = (() => {
+  const L = [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]], [[0.5, 0], [0.5, 1]]];
+  const c = []; for (let i = 0; i <= 48; i++) { const t = i / 48 * 2 * Math.PI; c.push([0.5 + 9.15 / 105.3 * Math.cos(t), 0.5 + 9.15 / 68 * Math.sin(t)]); } L.push(c);
+  for (const [dep, wid] of [[16.5, 40.32], [5.5, 18.32]]) { const d = dep / 105.3, hw = wid / 2 / 68; L.push([[0, .5 - hw], [d, .5 - hw], [d, .5 + hw], [0, .5 + hw]]); L.push([[1, .5 - hw], [1 - d, .5 - hw], [1 - d, .5 + hw], [1, .5 + hw]]); }
+  return L;
+})();
+function groundCircle(Hm, cx, cy, rm, n = 36) { const o = []; for (let i = 0; i < n; i++) { const t = i / n * 2 * Math.PI; o.push(ds.proj(Hm, cx + rm / ds.pitch[0] * Math.cos(t), cy + rm / ds.pitch[1] * Math.sin(t))); } return o; }
+function poly(ctx, pts, close) { ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); if (close) ctx.closePath(); }
+let hitList = [];
+function draw() {
+  if (!ds || !P) return;
+  const ov = $('#ov'), ctx = ov.getContext('2d'); ctx.clearRect(0, 0, ov.width, ov.height);
+  const r = cur, Hm = ds.H(r), b = ds.ball(r), PL = ds.players(r), tp = +$('#rad').value, holder = P.lhPid[r];
+  hitList = []; ctx.lineWidth = 1.2; ctx.font = '500 13px Inter';
+  if (!Hm) { ctx.fillStyle = 'rgba(240,60,60,.9)'; ctx.font = '500 14px Inter'; ctx.fillText('no homography on this frame', 16, ov.height - 16); drawPossCard(r, b, tp, 0, 0); return; }
+  if (layers.pitch) { ctx.strokeStyle = 'rgba(255,255,255,.55)'; for (const L of PITCH_LINES) { poly(ctx, L.map(p => ds.proj(Hm, p[0], p[1]))); ctx.stroke(); } }
+  if (layers.regions && PL.length) { const gw = 30, gh = 20; ctx.globalAlpha = .18; for (let i = 0; i < gw; i++) for (let j = 0; j < gh; j++) { const cx = (i + .5) / gw, cy = (j + .5) / gh; let bh = 1e9, ba = 1e9; for (const p of PL) { const d = ds.metres({ x: cx, y: cy }, p); if (ds.sideOf(p.k) === 'H') bh = Math.min(bh, d); else if (ds.sideOf(p.k) === 'A') ba = Math.min(ba, d); } if (bh === ba) continue; ctx.fillStyle = bh < ba ? TEAM.H : TEAM.A; poly(ctx, [[i / gw, j / gh], [(i + 1) / gw, j / gh], [(i + 1) / gw, (j + 1) / gh], [i / gw, (j + 1) / gh]].map(p => ds.proj(Hm, p[0], p[1])), true); ctx.fill(); } ctx.globalAlpha = 1; }
+  const hd = ds.attackDir(ds.start + r);
+  if (layers.arrows && hd) for (const [c, x0, x1] of [[TEAM.H, .34, .44], [TEAM.A, .66, .56]]) { let a = x0, bb = x1; if (hd < 0) { a = 1 - a; bb = 1 - bb; } const p0 = ds.proj(Hm, a, -.035), p1 = ds.proj(Hm, bb, -.035); ctx.strokeStyle = c; ctx.lineWidth = 2; poly(ctx, [p0, p1]); ctx.stroke(); const ang = Math.atan2(p1[1] - p0[1], p1[0] - p0[0]); poly(ctx, [[p1[0] - 9 * Math.cos(ang - .5), p1[1] - 9 * Math.sin(ang - .5)], p1, [p1[0] - 9 * Math.cos(ang + .5), p1[1] - 9 * Math.sin(ang + .5)]]); ctx.stroke(); ctx.lineWidth = 1.2; }
+  if (b && layers.trail) { const n = Math.round(1.5 * ds.fps); ctx.strokeStyle = '#fff'; for (let i = Math.max(1, r - n); i <= r; i++) { const a = ds.ball(i - 1), c = ds.ball(i); if (!a || !c) continue; ctx.globalAlpha = .15 + .6 * (i - (r - n)) / n; poly(ctx, [ds.proj(Hm, a.x, a.y), ds.proj(Hm, c.x, c.y)]); ctx.stroke(); } ctx.globalAlpha = 1; }
+  if (b && layers.future) { ctx.fillStyle = '#fff'; for (let i = r + 3; i <= Math.min(ds.n - 1, r + ds.fps); i += 3) { const c = ds.ball(i); if (!c) continue; const p = ds.proj(Hm, c.x, c.y); ctx.beginPath(); ctx.arc(p[0], p[1], 1.4, 0, 7); ctx.fill(); } }
+  if (layers.events) {
+    for (const kr of E.kick) { const age = (r - kr) / ds.fps; if (age >= 0 && age < .4) { const kb = ds.ball(kr); if (kb) { ctx.strokeStyle = col('kick'); ctx.globalAlpha = 1 - age / .4; poly(ctx, groundCircle(Hm, kb.x, kb.y, .6 + 3 * age), true); ctx.stroke(); ctx.globalAlpha = 1; } } }
+    for (const [jr, k] of ds.meta.events.pjump) { const age = (r - jr) / ds.fps; if (age >= 0 && age < .8 && jr > 0) { const a = ds.slot(jr - 1, k), c = ds.slot(jr, k); if (a && c) { ctx.strokeStyle = col('jump'); ctx.lineWidth = 2; ctx.globalAlpha = 1 - age / .8; poly(ctx, [ds.proj(Hm, a.x, a.y), ds.proj(Hm, c.x, c.y)]); ctx.stroke(); ctx.globalAlpha = 1; ctx.lineWidth = 1.2; } } }
+    for (const [jr] of ds.meta.events.bjump) { const age = (r - jr) / ds.fps; if (age >= 0 && age < .8 && jr > 0) { const a = ds.ball(jr - 1), c = ds.ball(jr); if (a && c) { ctx.strokeStyle = col('jump'); ctx.lineWidth = 2; ctx.globalAlpha = 1 - age / .8; poly(ctx, [ds.proj(Hm, a.x, a.y), ds.proj(Hm, c.x, c.y)]); ctx.stroke(); ctx.globalAlpha = 1; ctx.lineWidth = 1.2; } } }
+    for (const [vr, k] of ds.meta.events.vanish) { const age = (r - vr) / ds.fps; if (age >= 0 && age < 1 && vr > 0) { const a = ds.slot(vr - 1, k); if (a) { const p = ds.proj(Hm, a.x, a.y); ctx.strokeStyle = col('churn'); ctx.globalAlpha = 1 - age; ctx.beginPath(); ctx.arc(p[0], p[1], 8, 0, 7); ctx.stroke(); ctx.fillStyle = col('churn'); ctx.fillText('lost #' + ds.numOf(k), p[0] + 11, p[1] - 10); ctx.globalAlpha = 1; } } }
+    for (const [ar, k] of ds.meta.events.appear) { const age = (r - ar) / ds.fps; if (age >= 0 && age < .6) { const a = ds.slot(ar, k); if (a) { ctx.strokeStyle = col('churn'); ctx.globalAlpha = 1 - age / .6; poly(ctx, groundCircle(Hm, a.x, a.y, .5 + 1.5 * age), true); ctx.stroke(); ctx.globalAlpha = 1; } } }
+  }
+  let inH = 0, inA = 0; const nearest = { H: null, A: null };
+  if (b) {
+    for (const p of PL) { const d = ds.metres(b, p), s = ds.sideOf(p.k); if (s === 'H' || s === 'A') { if (d <= tp) s === 'H' ? inH++ : inA++; if (!nearest[s] || d < nearest[s].d) nearest[s] = { d, k: p.k, p }; } }
+    if (layers.ring) { poly(ctx, groundCircle(Hm, b.x, b.y, tp), true); const tint = inH && !inA ? TEAM.H : inA && !inH ? TEAM.A : null; if (tint) { ctx.fillStyle = tint; ctx.globalAlpha = .16; ctx.fill(); ctx.globalAlpha = 1; } ctx.strokeStyle = col('ring'); ctx.stroke(); }
+  }
+  if (layers.hull) for (const s of ['H', 'A']) { const pts = PL.filter(p => ds.sideOf(p.k) === s).map(p => ds.proj(Hm, p.x, p.y)); if (pts.length >= 3) { const hull = convexHull(pts); ctx.fillStyle = TEAM[s]; ctx.globalAlpha = .08; poly(ctx, hull, true); ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = TEAM[s]; ctx.stroke(); } }
+  if (layers.players) for (const p of PL) {
+    const [x, y] = ds.proj(Hm, p.x, p.y), s = ds.sideOf(p.k), c = TEAM[s] || '#888';
+    const isHolder = p.k === holder, isPin = pinned.includes(p.k), isHov = hover === p.k;
+    if (isHolder && layers.holder) { ctx.fillStyle = c; ctx.globalAlpha = .38; poly(ctx, groundCircle(Hm, p.x, p.y, .6), true); ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = c; ctx.stroke(); }
+    if (isPin) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; poly(ctx, groundCircle(Hm, p.x, p.y, .45), true); ctx.stroke(); ctx.lineWidth = 1.2; const n = Math.round(3 * ds.fps); for (let i = Math.max(1, r - n); i <= r; i++) { const a = ds.slot(i - 1, p.k), d = ds.slot(i, p.k); if (!a || !d) continue; ctx.strokeStyle = c; ctx.globalAlpha = .2 + .6 * (i - (r - n)) / n; poly(ctx, [ds.proj(Hm, a.x, a.y), ds.proj(Hm, d.x, d.y)]); ctx.stroke(); } ctx.globalAlpha = 1; }
+    ctx.beginPath(); ctx.arc(x, y, isHov ? 10 : 8, 0, 7); ctx.strokeStyle = '#000'; ctx.lineWidth = 3; ctx.stroke(); ctx.strokeStyle = c; ctx.lineWidth = isHov || isPin ? 2 : 1.2; ctx.stroke(); ctx.lineWidth = 1.2;
+    if (layers.labels || isHolder || isHov || isPin) { let lab = ds.numOf(p.k); if (isHolder && b) lab += '  ' + ds.metres(b, p).toFixed(1) + ' m'; ctx.font = (isHolder ? '600 ' : '500 ') + '12px Inter'; ctx.fillStyle = '#000'; ctx.fillText(lab, x + 11, y - 9); ctx.fillStyle = c; ctx.fillText(lab, x + 10, y - 10); }
+    hitList.push({ x, y, k: p.k });
+  }
+  if (b && holder >= 0 && layers.opp) { const os = ds.sideOf(holder) === 'H' ? 'A' : 'H', nn = nearest[os]; if (nn) { const o = ds.proj(Hm, nn.p.x, nn.p.y), bp = ds.proj(Hm, b.x, b.y); ctx.strokeStyle = TEAM[os]; ctx.globalAlpha = .7; poly(ctx, [o, bp]); ctx.stroke(); ctx.globalAlpha = 1; ctx.fillStyle = TEAM[os]; ctx.font = '500 11px Inter'; ctx.fillText(nn.d.toFixed(1) + ' m', (o[0] + bp[0]) / 2 + 4, (o[1] + bp[1]) / 2 - 6); } }
+  if (pinned.length === 2) { const a = ds.slot(r, pinned[0]), c = ds.slot(r, pinned[1]); if (a && c) { const pa = ds.proj(Hm, a.x, a.y), pc = ds.proj(Hm, c.x, c.y); ctx.setLineDash([4, 4]); ctx.strokeStyle = '#fff'; poly(ctx, [pa, pc]); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle = '#fff'; ctx.font = '500 12px Inter'; ctx.fillText(ds.metres(a, c).toFixed(1) + ' m', (pa[0] + pc[0]) / 2 + 4, (pa[1] + pc[1]) / 2 - 6); } }
+  if (b && layers.ball) { poly(ctx, groundCircle(Hm, b.x, b.y, ds.meta.ball_radius, 16), true); ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke(); ctx.lineWidth = 1.2; const pb = ds.ball(r - 1); if (pb && b.sf > 1) { const c = ds.proj(Hm, b.x, b.y), e = ds.proj(Hm, b.x + (b.x - pb.x) * 10, b.y + (b.y - pb.y) * 10); ctx.strokeStyle = '#fff'; poly(ctx, [c, e]); ctx.stroke(); } }
+  if (layers.ann) { drawAnn(ctx, Hm, r, 'A'); drawAnn(ctx, Hm, r, 'B'); drawPending(ctx, Hm); }
+  drawPossCard(r, b, tp, inH, inA);
+}
+function convexHull(pts) { pts = [...pts].sort((a, b) => a[0] - b[0] || a[1] - b[1]); const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]); const lo = [], up = []; for (const p of pts) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); } for (const p of pts.reverse()) { while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); } return lo.slice(0, -1).concat(up.slice(0, -1)); }
+function annAnchor(a, Hm, r) { if (a.x !== undefined) return ds.proj(Hm, a.x, a.y); if (a.slots) { const s = ds.slot(r, a.slots[0]); if (s) return ds.proj(Hm, s.x, s.y); } if (a.bx !== undefined) return ds.proj(Hm, a.bx, a.by); return null; }
+function drawAnn(ctx, Hm, r, layer) {
+  const hollow = layer === 'B';
+  for (const a of store.near(r, 0.6 * ds.fps, layer)) {
+    const inside = a.f <= r && r <= (a.f2 ?? a.f); const al = inside ? 1 : 0.35; const c = annColor(a);
+    const p = annAnchor(a, Hm, r); if (!p) continue;
+    ctx.globalAlpha = al; ctx.strokeStyle = c; ctx.fillStyle = c; ctx.lineWidth = hollow ? 1 : 1.5; if (hollow) ctx.setLineDash([2, 3]);
+    if (a.type === 'ball_pos') { ctx.beginPath(); ctx.arc(p[0], p[1], 6, 0, 7); ctx.stroke(); ctx.beginPath(); ctx.moveTo(p[0] - 10, p[1]); ctx.lineTo(p[0] + 10, p[1]); ctx.moveTo(p[0], p[1] - 10); ctx.lineTo(p[0], p[1] + 10); ctx.stroke(); const b = ds.ball(r); if (b && inside) { const q = ds.proj(Hm, b.x, b.y); ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(q[0], q[1]); ctx.lineTo(p[0], p[1]); ctx.stroke(); } }
+    else if (a.type === 'player_missing') { ctx.strokeStyle = TEAM[a.team] || c; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(p[0], p[1], 9, 0, 7); ctx.stroke(); ctx.fillStyle = TEAM[a.team] || c; ctx.fillText('+ ' + (a.team === 'H' ? 'BAR' : 'ATH'), p[0] + 11, p[1] - 10); }
+    else if (a.type === 'id_swap' && a.slots && a.slots[1] !== undefined) { const s2 = ds.slot(r, a.slots[1]); if (s2) { const q = ds.proj(Hm, s2.x, s2.y); ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke(); ctx.fillText('⇄', (p[0] + q[0]) / 2, (p[1] + q[1]) / 2 - 4); } }
+    else if (a.cat === 'data') { ctx.beginPath(); ctx.rect(p[0] - 11, p[1] - 11, 22, 22); ctx.stroke(); ctx.fillText(annLabel(a) + (hollow ? ' (B)' : ''), p[0] + 14, p[1] + 20); }
+    else if (a.cat === 'event') { glyph(ctx, 'diamond', p[0], p[1] - 18, 6, c, hollow); ctx.fillText(annLabel(a) + (hollow ? ' (B)' : ''), p[0] + 9, p[1] - 20); }
+    ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.lineWidth = 1.2;
+  }
+}
+function drawPending(ctx, Hm) {
+  const p = store.pending; if (!p) return;
+  if (p.x !== undefined) { const q = ds.proj(Hm, p.x, p.y); ctx.strokeStyle = '#fff'; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(q[0], q[1], 9, 0, 7); ctx.stroke(); ctx.beginPath(); ctx.moveTo(q[0] - 14, q[1]); ctx.lineTo(q[0] + 14, q[1]); ctx.moveTo(q[0], q[1] - 14); ctx.lineTo(q[0], q[1] + 14); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle = '#fff'; ctx.font = '500 11px Inter'; ctx.fillText(`${TYPE[p.type].label} (open)`, q[0] + 16, q[1] - 12); }
+  else if (pendingClicks.length && pendingClicks[0].x !== undefined) { const q = ds.proj(Hm, pendingClicks[0].x, pendingClicks[0].y); ctx.strokeStyle = '#fff'; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(q[0], q[1], 9, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
+}
+function drawPossCard(r, b, tp, inH, inA) {
+  const g = ds.gt(r), el = $('#possCard'); let html = '';
+  const name = { H: 'Barcelona · home', A: 'Athletic · away', D: 'dead ball', X: 'no label' };
+  if (g !== null) { let s = r; while (s > 0 && ds.gt(s - 1) === g) s--; html += `<div class="card" style="border-top:3px solid ${TEAM[g]}"><div class="lbl">ground truth</div><div class="big" style="color:${TEAM[g]}">${g}</div><div class="name">${name[g]}</div><div class="sub">held ${((r - s) / ds.fps).toFixed(1)} s</div></div>`; }
+  else html += `<div class="card"><div class="lbl">ground truth</div><div class="sub">none on the broadcast timeline</div></div>`;
+  if (ds.meta.pred) { const p = ds.pred(r), ok = p === g; html += `<div class="card" style="border-top:3px solid ${ok ? col('good') : col('bad')}"><div class="lbl">prediction</div><div class="big" style="color:${ok ? col('good') : col('bad')}">${p}</div><div class="sub">${ok ? 'agrees' : 'disagrees'}</div></div>`; }
+  html += `<div class="card"><div class="lbl">heuristics</div><div class="row"><span class="k">naive</span><span class="v" style="color:${TEAM[P.naive[r]]}">${P.naive[r] || '-'}</span></div><div class="row"><span class="k">L&amp;H</span><span class="v" style="color:${TEAM[P.lh[r]]}">${P.lh[r] || '-'}</span></div><div class="row"><span class="k">within ${tp} m</span><span class="v"><span style="color:${TEAM.H}">H ${inH}</span> <span style="color:${TEAM.A}">A ${inA}</span></span></div></div>`;
+  const seg = store.segmentAt(r); if (seg.state !== 'clear') { const dl = store.derivedLabel(r); const it = SCHEMA.state.items.find(i => i[0] === seg.state); html += `<div class="card" style="border-top:3px solid ${TEAM[dl]}"><div class="lbl">my reading</div><div class="big" style="color:${TEAM[dl]}">${dl}</div><div class="sub" style="color:${it[3]}">${it[2]}</div></div>`; }
+  el.innerHTML = html;
+}
+function pitchXY(e) { const ov = $('#ov'), rct = ov.getBoundingClientRect(); return [(e.clientX - rct.left) * ov.width / rct.width, (e.clientY - rct.top) * ov.height / rct.height]; }
+function nearestHit(e) { const [x, y] = pitchXY(e); let best = null, bd = 18; for (const h of hitList) { const d = Math.hypot(h.x - x, h.y - y); if (d < bd) { bd = d; best = h; } } return best; }
+function onPitchHover(e) {
+  if (magnify) drawMagnifier(e);
+  const h = nearestHit(e), tip = $('#tip');
+  if (!h) { if (hover !== null) { hover = null; draw(); } tip.style.display = 'none'; return; }
+  if (hover !== h.k) { hover = h.k; draw(); }
+  const p = ds.slot(cur, h.k), b = ds.ball(cur), s = ds.sideOf(h.k), wr = $('#wrap').getBoundingClientRect();
+  tip.style.display = 'block'; tip.style.left = (e.clientX - wr.left + 14) + 'px'; tip.style.top = (e.clientY - wr.top + 14) + 'px';
+  tip.innerHTML = `<b style="color:${TEAM[s]}">#${ds.numOf(h.k)}</b> ${s === 'H' ? 'Barcelona' : s === 'A' ? 'Athletic' : '?'}<br>speed data ${fmt(p.sd)} · frames ${fmt(p.sf)} m/s${b ? `<br>to ball ${ds.metres(b, p).toFixed(2)} m` : ''}<br>x ${p.x.toFixed(3)} y ${p.y.toFixed(3)}`;
+}
+function drawMagnifier(e) {
+  const m = $('#mag'), v = $('#v'), ov = $('#ov'), wr = $('#wrap').getBoundingClientRect(); const [px, py] = pitchXY(e); const size = 220, zoom = 2.5;
+  m.width = size; m.height = size; m.style.left = (e.clientX - wr.left + 20) + 'px'; m.style.top = (e.clientY - wr.top - size - 20) + 'px';
+  const g = m.getContext('2d'); const sw = size / zoom; g.drawImage(v, px - sw / 2, py - sw / 2, sw, sw, 0, 0, size, size); g.drawImage(ov, px - sw / 2, py - sw / 2, sw, sw, 0, 0, size, size);
+  g.strokeStyle = '#fff'; g.beginPath(); g.moveTo(size / 2 - 8, size / 2); g.lineTo(size / 2 + 8, size / 2); g.moveTo(size / 2, size / 2 - 8); g.lineTo(size / 2, size / 2 + 8); g.stroke();
+}
+function onPitchClick(e) {
+  if (armed || (store.pending && store.pending.x !== undefined)) { toolClick(e); return; }
+  const h = nearestHit(e); if (!h) return;
+  if (e.shiftKey) { if (!pinned.includes(h.k)) pinned = [...pinned.slice(-1), h.k]; } else pinned = pinned.includes(h.k) ? [] : [h.k];
+  renderPinned(); draw(); drawTimeline();
+}
+function renderPinned() { const el = $('#pinned'); if (!pinned.length) { el.className = 'hint'; el.textContent = 'click a player on the pitch to pin; shift-click two for a distance; click a slot row label to pin that slot'; return; } el.className = ''; el.innerHTML = pinned.map(k => `<div class="row"><span class="k" style="color:${TEAM[ds.sideOf(k)]}">#${ds.numOf(k)}</span><span class="v" id="pin${k}"></span></div>`).join(''); updateInfo(); }
+
+// ---------------------------------------------------------------- side info
+function updateInfo() {
+  const r = cur, f = ds.start + r, t = f / ds.fps, b = ds.ball(r), PL = ds.players(r);
+  $('#clkFrame').textContent = 'frame ' + f; $('#clkTime').textContent = `${String(Math.floor(t / 60)).padStart(2, '0')}:${(t % 60).toFixed(2).padStart(5, '0')}`;
+  const h = ds.halfOf(f); let ht = ''; if (h) { const a = ds.meta.halves[h][0]; const s = (f - a) / ds.fps + (h === 2 ? 2700 : 0); ht = `${h === 1 ? '1st' : '2nd'} half ${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`; } $('#clkHalf').textContent = ht;
+  const rows = []; const row = (k, v, c) => rows.push(`<div class="row"><span class="k">${k}</span><span class="v"${c ? ` style="color:${c}"` : ''}>${v}</span></div>`);
+  if (b) { row('ball', `${b.x.toFixed(3)}, ${b.y.toFixed(3)}${Number.isFinite(b.z) ? ' · z ' + b.z.toFixed(2) + ' m' : ''}`); row('ball speed frames / data', `${fmt(b.sf)} / ${fmt(b.sd)} m/s`); row('ball accel', `${fmt(b.acc)} m/s²`, E.kick.has(r) ? col('kick') : null); } else row('ball', 'not tracked', col('bad'));
+  const nH = PL.filter(p => ds.sideOf(p.k) === 'H').length, nA = PL.filter(p => ds.sideOf(p.k) === 'A').length;
+  row('tracked', `<span style="color:${TEAM.H}">H ${nH}</span> <span style="color:${TEAM.A}">A ${nA}</span> · ${PL.length}`, PL.length !== 22 ? col('warn') : null);
+  const k = P.lhPid[r]; if (k >= 0 && b) { const hp = ds.slot(r, k); let press = 0; for (const p of PL) if (ds.sideOf(p.k) !== ds.sideOf(k) && ds.metres(hp, p) <= 3) press++; row('L&H holder', `#${ds.numOf(k)} · pressure ${press} opp &lt; 3 m`, TEAM[ds.sideOf(k)]); }
+  let fast = null; for (const p of PL) if (Number.isFinite(p.sd) && (!fast || p.sd > fast.sd)) fast = p; if (fast) row('fastest', `#${ds.numOf(fast.k)} ${fast.sd.toFixed(1)} m/s${fast.sd > ds.meta.bolt ? ' › Bolt' : ''}`, fast.sd > ds.meta.bolt ? col('bolt') : null);
+  if (ds.meta.hom_err) { const e = ds.meta.hom_err[r]; row('homography err', e < 0 ? 'none' : e.toFixed(2), e < 0 || e > 3 ? col('bad') : e > 1 ? col('warn') : col('good')); }
+  const hd = ds.attackDir(f); if (hd) row('attack', `BAR ${hd > 0 ? '→' : '←'} · ATH ${hd > 0 ? '←' : '→'}`);
+  for (const e of ds.meta.tags.filter(e => e.a <= f && f < e.b)) row(e.restart ? 'restart' : 'tag', e.restart ? `${e.restart[0]} · ${e.team || '-'}` : `${e.code} · ${e.team || '-'}`, e.restart ? rgb(e.restart[1]) : TEAM[e.side] || null);
+  const seg = store.segmentAt(r); if (seg.state !== 'clear') row('my reading', `${seg.team || '-'} · ${seg.state}`, TEAM[store.derivedLabel(r)]);
+  if (store.layerB.segments.length) { const sb = store.segmentAt(r, false, 'B'); row('annotator B', `${sb.team || '-'} · ${sb.state}`, TEAM[store.derivedLabel(r, 'B')]); }
+  $('#fi').innerHTML = rows.join('');
+  for (const kk of pinned) { const p = ds.slot(r, kk), el = $('#pin' + kk); if (el) el.innerHTML = p ? `${fmt(p.sd)} m/s${b ? ' · ' + ds.metres(b, p).toFixed(1) + ' m to ball' : ''}` : 'not tracked'; }
+  renderQueue();
+  for (const d of $('#annList').children) d.classList.toggle('cur', false);
+}
+
+// ---------------------------------------------------------------- timeline
+function buildRows() {
+  ROWS = [];
+  const grp = (name, rows, opts = {}) => { if (rows.length || opts.forceHeader) ROWS.push({ grp: name, ...opts }); ROWS.push(...rows); };
+  const lab = (name, get, cmap = TEAM3) => ({ name, kind: 'label', get, cmap });
+  const mask = (name, get, color) => ({ name, kind: 'mask', get, color: hex(color) });
+  const pr = []; if (ds.meta.gt) pr.push(lab('GT', r => ds.gt(r))); if (ds.meta.pred) pr.push(lab('PRED', r => ds.pred(r)));
+  pr.push(lab('NAIVE', r => P.naive[r]), lab('L&H', r => P.lh[r]), { name: 'SEGMENT', kind: 'segment', layer: 'A' }, lab('MINE', r => store.derivedLabel(r)));
+  if (store.layerB.segments.length) pr.push({ name: 'SEGMENT B', kind: 'segment', layer: 'B' });
+  grp('possession', pr);
+  const ev = [{ name: 'RESTART', kind: 'restart' }, mask('KICK', r => E.kick.has(r), col('kick')), { name: 'ANN EVENTS', kind: 'ann', cat: 'event', layer: 'A' }];
+  if (store.layerB.points.length) ev.push({ name: 'ANN B', kind: 'ann', cat: null, layer: 'B' });
+  ev.push(mask('BOOKMARK', r => store.bookmarks.some(b => b.f === r), '#ffffff'));
+  grp('events', ev);
+  const dq = [mask('BALL LOST', r => !ds.ball(r), col('lost')), { name: 'BALL SPEED', kind: 'int', color: hex('#ffffff'), vmax: 30, bad: 40, get: r => { const b = ds.ball(r); return b ? b.sf : NaN; } }];
+  if (ds.meta.has_z) dq.push({ name: 'BALL AIR', kind: 'int', color: hex(col('air')), vmax: 3, get: r => { const b = ds.ball(r); return b ? b.z : NaN; } });
+  dq.push(mask('BALL JUMP', r => E.bjump.has(r), col('jump')), mask('PLAYER JUMP', r => E.pjump.has(r), col('jump')), mask('DROPOUT <0.5 s', r => ds.meta.dropout[r], '#777777'), mask('VANISH/APPEAR', r => E.churnFrames.includes(r), col('churn')));
+  dq.push({ name: 'COUNT ≠ 22', kind: 'cat', get: r => { const c = ds.meta.count[r]; return c > 22 ? hex(col('churn')) : c < 16 ? hex(col('bad')) : c < 20 ? hex(col('warn')) : c < 22 ? [90, 90, 90] : null; } });
+  dq.push(mask('› BOLT', r => ds.meta.pmax[r] > ds.meta.bolt, col('bolt')));
+  if (ds.meta.hom_err) dq.push({ name: 'HOMOGRAPHY', kind: 'cat', get: r => { const e = ds.meta.hom_err[r]; return e < 0 ? hex(col('bad')) : e < 1 ? hex(col('good')) : e < 3 ? hex(col('warn')) : hex(col('bad')); } });
+  dq.push({ name: 'ANN DATA', kind: 'ann', cat: 'data', layer: 'A' });
+  grp('data quality', dq);
+  const runs = slotRuns(ds); runs.team = k => ds.sideOf(k);
+  const order = orderSlots(runs, view[0], view[1]);
+  grp(`slots ${slotsOpen ? '▾' : '▸'} (${ds.S})`, slotsOpen ? order.map(k => ({ name: `#${ds.numOf(k)}`, kind: 'slot', k, runs: runs[k], jumps: runs.jumps[k] })) : [], { toggle: true, forceHeader: true });
+  rowCache.clear();
+}
+function rowStrip(row, r0, r1, W) {
+  const key = [row.name, r0, r1, W, $('#rad').value, store.segments.length, store.points.length, store.bookmarks.length, store.layerB.points.length, pinned.join()].join('|');
+  if (rowCache.has(key)) return rowCache.get(key);
+  let px;
+  if (row.kind === 'label') px = rasterLabel(row.get, r0, r1, W, row.cmap, BG3);
+  else if (row.kind === 'mask') px = rasterMask(row.get, r0, r1, W, row.color, BG3);
+  else if (row.kind === 'int') px = rasterIntensity(row.get, r0, r1, W, row.vmax, row.color, BG3, row.bad ? { bad: row.bad, badColor: hex(col('bad')) } : {});
+  else if (row.kind === 'cat') px = rasterCategorical(row.get, r0, r1, W, BG3);
+  else if (row.kind === 'segment') px = rasterCategorical(r => { const s = store.segmentAt(r, false, row.layer); if (s.state === 'clear') return null; if (s.state === 'dead') return TEAM3.D; if (!s.team) return null; const base = TEAM3[s.team]; const sh = STATE_SHADE[s.state] ?? 0; const c = lighten(base, sh); return s.state === 'loose' && (r % 4 < 2) ? BG3 : c; }, r0, r1, W, BG3);
+  else if (row.kind === 'ann') px = rasterInterval(store.items(row.layer).filter(a => !row.cat || a.cat === row.cat).map(a => ({ f: a.f, f2: a.f2, color: hex(annColor(a)) })), r0, r1, W, BG3);
+  else if (row.kind === 'restart') { px = rasterInterval(ds.meta.tags.filter(e => e.restart).map(e => ({ f: e.a - ds.start, f2: e.b - ds.start, color: e.restart[1].slice().reverse().map(v => Math.round(v * .55)) })), r0, r1, W, BG3); const m = rasterMask(r => r > 0 && ds.gt(r - 1) === 'D' && 'HA'.includes(ds.gt(r) || ''), r0, r1, W, hex(col('good')), BG3); for (let i = 0; i < W * 3; i += 3) if (m[i] !== BG3[0] || m[i + 1] !== BG3[1] || m[i + 2] !== BG3[2]) { px[i] = m[i]; px[i + 1] = m[i + 1]; px[i + 2] = m[i + 2]; } }
+  else if (row.kind === 'slot') px = rasterSlot(row.runs, row.jumps, r0, r1, W, pinned.includes(row.k) ? TEAM3[ds.sideOf(row.k)] : TEAM3[ds.sideOf(row.k)].map(v => Math.round(v * .45 + 34 * .55)), hex(col('jump')), BG3);
+  const c = document.createElement('canvas'); c.width = W; c.height = 1; const g = c.getContext('2d'); const img = g.createImageData(W, 1);
+  for (let i = 0; i < W; i++) { img.data[i * 4] = px[i * 3]; img.data[i * 4 + 1] = px[i * 3 + 1]; img.data[i * 4 + 2] = px[i * 3 + 2]; img.data[i * 4 + 3] = 255; }
+  g.putImageData(img, 0, 0); rowCache.set(key, c); if (rowCache.size > 400) rowCache.delete(rowCache.keys().next().value); return c;
+}
+function rowVisible(name) { return !store.rows || store.rows.includes(name) || name.startsWith('#'); }
+function groupVisible(i) { if (ROWS[i].forceHeader) return true; for (let j = i + 1; j < ROWS.length && !ROWS[j].grp; j++) if (rowVisible(ROWS[j].name)) return true; return false; }
+let bands = null, bandBin = 0;
+// about 400 bins across the export, never finer than 2 s
+function ensureBands() { if (bands) return; bandBin = Math.max(ds.fps * 2, Math.round(ds.n / 400)); bands = aggregateBands(ds, E, P, bandBin); }
+function setupTimeline() {
+  const c = $('#tlc');
+  c.addEventListener('mousedown', e => { if (e.offsetY < overviewHeight() + 4) { $('#v').pause(); seek(Math.round(e.offsetX / c.clientWidth * (ds.n - 1))); return; } tlDrag = { x0: e.offsetX, x1: e.offsetX }; });
+  window.addEventListener('mousemove', e => { if (!tlDrag) return; const rct = c.getBoundingClientRect(); tlDrag.x1 = e.clientX - rct.left; drawTimeline(); });
+  window.addEventListener('mouseup', () => { if (!tlDrag) return; const [a, b] = [tlDrag.x0, tlDrag.x1].sort((x, y) => x - y), W = c.clientWidth; if (b - a < 4) { $('#v').pause(); seek(xToFrame(a, W)); } else { view = [xToFrame(a, W), xToFrame(b, W)]; if (view[1] - view[0] < 10) view[1] = view[0] + 10; buildRows(); } tlDrag = null; drawTimeline(); });
+  c.addEventListener('mousemove', e => { const W = c.clientWidth, r = xToFrame(e.offsetX, W), tip = $('#tip2'); tip.style.display = 'block'; tip.style.left = (e.clientX + 12) + 'px'; tip.style.top = (e.clientY - 70) + 'px'; const b = ds.ball(r), seg = store.segmentAt(r); tip.innerHTML = `<b class="mono">${ds.start + r}</b> · ${(r / ds.fps).toFixed(1)} s<br>GT <b style="color:${TEAM[ds.gt(r) || 'X']}">${ds.gt(r) || '-'}</b> · naive <b style="color:${TEAM[P.naive[r]]}">${P.naive[r] || '-'}</b> · L&amp;H <b style="color:${TEAM[P.lh[r]]}">${P.lh[r] || '-'}</b>${ds.meta.pred ? ` · pred <b style="color:${TEAM[ds.pred(r)]}">${ds.pred(r)}</b>` : ''}${seg.state !== 'clear' ? `<br>mine ${seg.team || '-'} · ${seg.state}` : ''}<br>ball ${b ? b.sf.toFixed(1) + ' m/s' : 'lost'} · tracked ${ds.meta.count[r]}`; });
+  c.addEventListener('mouseleave', () => $('#tip2').style.display = 'none');
+  c.addEventListener('wheel', e => { e.preventDefault(); const W = c.clientWidth, r = xToFrame(e.offsetX, W), span = view[1] - view[0], k = e.deltaY > 0 ? 1.25 : .8, ns = Math.max(10, Math.min(ds.n - 1, span * k)); let a = r - (r - view[0]) * ns / span; a = Math.max(0, Math.min(ds.n - 1 - ns, a)); view = [Math.round(a), Math.round(a + ns)]; buildRows(); drawTimeline(); }, { passive: false });
+  new ResizeObserver(drawTimeline).observe($('#tl'));
+}
+const xToFrame = (x, W) => Math.max(0, Math.min(ds.n - 1, Math.round(view[0] + x / W * (view[1] - view[0]))));
+const frameToX = (r, W) => (r - view[0]) / Math.max(1, view[1] - view[0]) * W;
+function drawTimeline() {
+  if (!ROWS.length) return; ensureBands();
+  const c = $('#tlc'), W = Math.max(50, c.clientWidth), dpr = window.devicePixelRatio || 1;
+  const items = overviewOn().map(n => OVERVIEW_ITEMS.find(i => i.name === n));
+  const ovH = items.reduce((s, it) => s + (it.kind === 'strip' ? OVH : BANDH) + 1, 0);
+  const TOP = ovH + 6 + FLAG; let h = TOP;
+  ROWS.forEach((r, i) => { if (r.grp) { if (groupVisible(i)) h += GG; } else if (rowVisible(r.name)) h += RH + RG; });
+  c.width = W * dpr; c.height = h * dpr; c.style.height = h + 'px'; const g = c.getContext('2d'); g.scale(dpr, dpr);
+  g.fillStyle = '#17191c'; g.fillRect(0, 0, W, h);
+  // overview: strips and bands over the whole export, in the order the user picked
+  const labels = $('#rowlabels'); labels.innerHTML = '';
+  const mkLab = (t, yy, cls, onclick) => { const d = document.createElement('div'); d.textContent = t; d.style.top = yy + 'px'; if (cls) d.className = cls; if (onclick) { d.onclick = onclick; d.style.cursor = 'pointer'; } labels.appendChild(d); };
+  const nb = bands.length, bw = W / nb; let y = 0;
+  for (const it of items) {
+    if (it.kind === 'strip') { const row = ROWS.find(r => r.name === it.row); const saved = view; view = [0, ds.n - 1]; g.drawImage(rowStrip(row, 0, ds.n - 1, W), 0, 0, W, 1, 0, y, W, OVH); view = saved; mkLab(it.name, y + 1, 'grp'); y += OVH + 1; continue; }
+    for (const [i, bnd] of bands.entries()) {
+      if (it.key === 'share') { const d = bnd.shareH - bnd.shareA; if (!d) continue; g.fillStyle = d > 0 ? TEAM.H : TEAM.A; g.globalAlpha = Math.min(1, Math.abs(d) * 1.3); }
+      else if (it.count) { if (!bnd[it.key]) continue; g.fillStyle = col(it.color); g.globalAlpha = Math.min(1, 0.5 + bnd[it.key] * 0.25); }
+      else { if (!bnd[it.key]) continue; g.fillStyle = col(it.color); g.globalAlpha = Math.min(1, bnd[it.key] * 1.5); }
+      g.fillRect(i * bw, y, Math.max(1, Math.ceil(bw)), BANDH); g.globalAlpha = 1;
+    }
+    mkLab(it.name, y, 'grp'); y += BANDH + 1;
+  }
+  const bandsH = ovH;
+  g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(view[0] / (ds.n - 1) * W, 0, Math.max(2, (view[1] - view[0]) / (ds.n - 1) * W), bandsH); g.strokeStyle = '#fff'; g.strokeRect(view[0] / (ds.n - 1) * W + .5, .5, Math.max(2, (view[1] - view[0]) / (ds.n - 1) * W), bandsH - 1);
+  g.fillStyle = '#fff'; g.fillRect(cur / (ds.n - 1) * W, 0, 1, bandsH);
+  // rows
+  y = TOP; const yFlag = TOP - FLAG;
+  for (let i = 0; i < ROWS.length; i++) {
+    const row = ROWS[i];
+    if (row.grp) { if (groupVisible(i)) { mkLab(row.grp, y + 1, 'grp', row.toggle ? () => { slotsOpen = !slotsOpen; buildRows(); drawTimeline(); } : null); y += GG; } continue; }
+    if (!rowVisible(row.name)) continue;
+    g.drawImage(rowStrip(row, view[0], view[1], W), 0, 0, W, 1, 0, y, W, RH);
+    mkLab(row.name, y + 1, row.kind === 'slot' && pinned.includes(row.k) ? 'pin' : null, row.kind === 'slot' ? () => { pinned = pinned.includes(row.k) ? [] : [row.k]; renderPinned(); rowCache.clear(); draw(); drawTimeline(); } : null);
+    y += RH + RG;
+  }
+  for (const f of E.flags) { if (f.r < view[0] || f.r > view[1]) continue; const x = frameToX(f.r, W), cc = rgb(f.color); g.strokeStyle = cc; g.globalAlpha = .5; g.beginPath(); g.moveTo(x + .5, yFlag); g.lineTo(x + .5, h); g.stroke(); g.globalAlpha = 1; glyph(g, f.glyph, x, yFlag + 6, 4.5, cc); }
+  for (const r of E.restartFrames) if (r >= view[0] && r <= view[1] && !E.flags.some(f => f.r === r)) { const x = frameToX(r, W); g.strokeStyle = col('good'); g.globalAlpha = .5; g.beginPath(); g.moveTo(x + .5, yFlag); g.lineTo(x + .5, h); g.stroke(); g.globalAlpha = 1; glyph(g, 'tri_up', x, yFlag + 6, 4.5, col('good')); }
+  for (const b of store.bookmarks) if (b.f >= view[0] && b.f <= view[1]) glyph(g, 'pin', frameToX(b.f, W), yFlag + 6, 4, '#fff');
+  for (const a of store.items('A')) if (a.f >= view[0] && a.f <= view[1]) glyph(g, a.cat === 'data' ? 'square' : 'diamond', frameToX(a.f, W), yFlag + 6, 3.5, annColor(a));
+  if (store.pending) { const x = frameToX(store.pending.f, W); g.strokeStyle = '#fff'; g.lineWidth = 2; g.beginPath(); g.moveTo(x + 4, yFlag); g.lineTo(x, yFlag); g.lineTo(x, h); g.lineTo(x + 4, h); g.stroke(); g.lineWidth = 1; g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(Math.min(x, frameToX(cur, W)), yFlag, Math.abs(frameToX(cur, W) - x), h - yFlag); }
+  for (const r of candFrames) if (r >= view[0] && r <= view[1]) { const x = frameToX(r, W); const s = queue.statusOf(r); g.fillStyle = s === 'done' ? 'rgba(90,220,90,.8)' : s === 'flagged' ? 'rgba(230,80,230,.9)' : s === 'skipped' ? 'rgba(150,150,150,.6)' : 'rgba(255,255,255,.5)'; g.fillRect(x, yFlag + FLAG - 3, 1, 3); }
+  if (loop) { g.fillStyle = 'rgba(120,220,255,.12)'; g.fillRect(frameToX(loop[0], W), yFlag, frameToX(loop[1], W) - frameToX(loop[0], W), h - yFlag); }
+  const cx = frameToX(cur, W); g.strokeStyle = '#fff'; g.lineWidth = 1; g.beginPath(); g.moveTo(cx + .5, yFlag); g.lineTo(cx + .5, h); g.stroke();
+  if (tlDrag) { const [a, b] = [tlDrag.x0, tlDrag.x1].sort((p, qq) => p - qq); g.fillStyle = 'rgba(50,170,235,.18)'; g.fillRect(a, yFlag, b - a, h - yFlag); }
+  g.fillStyle = '#9aa0a8'; g.font = '11px Inter'; g.textAlign = 'right'; g.fillText(`${ds.start + view[0]} - ${ds.start + view[1]}  (${((view[1] - view[0]) / ds.fps).toFixed(0)} s) · bands ${(bandBin / ds.fps).toFixed(0)} s per bin`, W - 2, bandsH + 11); g.textAlign = 'left';
+}
+function glyph(g, kind, x, y, r, c, hollow = false) {
+  g.fillStyle = c; g.strokeStyle = c; g.beginPath();
+  if (kind === 'circle') g.arc(x, y, r, 0, 7);
+  else if (kind === 'square') g.rect(x - r, y - r, 2 * r, 2 * r);
+  else if (kind === 'diamond') { g.moveTo(x, y - r); g.lineTo(x + r, y); g.lineTo(x, y + r); g.lineTo(x - r, y); g.closePath(); }
+  else if (kind === 'tri_up') { g.moveTo(x, y - r); g.lineTo(x + r, y + r); g.lineTo(x - r, y + r); g.closePath(); }
+  else if (kind === 'tri_down') { g.moveTo(x, y + r); g.lineTo(x + r, y - r); g.lineTo(x - r, y - r); g.closePath(); }
+  else if (kind === 'star') { for (let i = 0; i < 10; i++) { const rr = i % 2 ? r * .5 : r * 1.3, t = -Math.PI / 2 + i * Math.PI / 5; i ? g.lineTo(x + rr * Math.cos(t), y + rr * Math.sin(t)) : g.moveTo(x + rr * Math.cos(t), y + rr * Math.sin(t)); } g.closePath(); }
+  else if (kind === 'pin') { g.moveTo(x, y + r); g.lineTo(x - r * .8, y - r * .4); g.lineTo(x + r * .8, y - r * .4); g.closePath(); }
+  else { g.moveTo(x - r, y - r); g.lineTo(x + r, y + r); g.moveTo(x + r, y - r); g.lineTo(x - r, y + r); g.stroke(); return; }
+  hollow ? g.stroke() : g.fill();
+}
+// ---------------------------------------------------------------- overview filter (S11)
+// which overview items are on, in display order; GT is forced first
+function overviewOn() {
+  const picked = store.overview || OVERVIEW_DEFAULT;
+  const ok = n => { const it = OVERVIEW_ITEMS.find(i => i.name === n); return it && (it.kind !== 'strip' || ROWS.some(r => r.name === it.row)); };
+  return ['GT', ...OVERVIEW_ITEMS.map(i => i.name).filter(n => n !== 'GT' && picked.includes(n))].filter(ok);
+}
+function overviewHeight() { return overviewOn().reduce((s, n) => s + (OVERVIEW_ITEMS.find(i => i.name === n).kind === 'strip' ? OVH : BANDH) + 1, 0); }
+function setupOverviewFilter() {
+  const pop = $('#ovpop');
+  $('#bOverview').onclick = e => { e.stopPropagation(); $('#rowpop').style.display = 'none'; pop.style.display = pop.style.display === 'block' ? 'none' : 'block'; renderOverviewPop(); };
+  document.addEventListener('click', e => { if (!pop.contains(e.target)) pop.style.display = 'none'; });
+}
+function renderOverviewPop() {
+  const pop = $('#ovpop'); pop.innerHTML = '<div class="lbl" style="margin-bottom:6px">overview rows, whole export</div>';
+  const on = overviewOn();
+  for (const it of OVERVIEW_ITEMS) {
+    if (it.kind === 'strip' && !ROWS.some(r => r.name === it.row)) continue;
+    const l = document.createElement('label'); l.className = 'chk';
+    l.innerHTML = `<input type="checkbox" ${on.includes(it.name) ? 'checked' : ''} ${it.name === 'GT' ? 'disabled' : ''}> ${it.name}`;
+    l.querySelector('input').onchange = e => { e.stopPropagation(); let next = on.filter(n => n !== it.name); if (e.target.checked) next.push(it.name); store.setOverview(next); drawTimeline(); renderOverviewPop(); };
+    l.onclick = e => e.stopPropagation(); pop.appendChild(l);
+  }
+  const b = document.createElement('button'); b.textContent = 'defaults'; b.style.marginTop = '6px';
+  b.onclick = e => { e.stopPropagation(); store.setOverview(null); renderOverviewPop(); drawTimeline(); }; pop.appendChild(b);
+}
+// ---------------------------------------------------------------- row filter
+function setupRowFilter() {
+  const pop = $('#rowpop'); $('#bRows').onclick = e => { e.stopPropagation(); $('#ovpop').style.display = 'none'; pop.style.display = pop.style.display === 'block' ? 'none' : 'block'; renderRowPop(); };
+  document.addEventListener('click', e => { if (!pop.contains(e.target)) pop.style.display = 'none'; });
+}
+function renderRowPop() {
+  const pop = $('#rowpop'); pop.innerHTML = '<div class="lbl" style="margin-bottom:6px">presets</div><div class="presets"></div>';
+  const pr = pop.querySelector('.presets');
+  for (const name in ROW_PRESETS) { const b = document.createElement('button'); b.textContent = name; b.onclick = e => { e.stopPropagation(); store.setRows(ROW_PRESETS[name] ? ROW_PRESETS[name].slice() : null); renderRowPop(); buildLegend(); drawTimeline(); }; pr.appendChild(b); }
+  for (const row of ROWS) {
+    if (row.grp) { if (row.toggle) continue; const g = document.createElement('div'); g.className = 'lbl grp'; g.textContent = row.grp; pop.appendChild(g); continue; }
+    if (row.kind === 'slot') continue;
+    const l = document.createElement('label'); l.className = 'chk'; l.innerHTML = `<input type="checkbox" ${rowVisible(row.name) ? 'checked' : ''}> ${row.name}`;
+    l.querySelector('input').onchange = e => { e.stopPropagation(); const all = ROWS.filter(r => !r.grp && r.kind !== 'slot').map(r => r.name); const cur_ = store.rows ? store.rows.slice() : all.slice(); const i = cur_.indexOf(row.name); if (e.target.checked && i < 0) cur_.push(row.name); if (!e.target.checked && i >= 0) cur_.splice(i, 1); store.setRows(cur_.length === all.length ? null : cur_); buildLegend(); drawTimeline(); };
+    l.onclick = e => e.stopPropagation(); pop.appendChild(l);
+  }
+}
+// a small hook so the e2e test can look inside
+window.__pv = { overviewOn, get ds() { return ds; }, get store() { return store; }, get P() { return P; }, get queue() { return queue; }, get cur() { return cur; }, get view() { return view; }, get pinned() { return pinned; }, get hitList() { return hitList; }, seek, setCandType(t) { candType = t; $('#candType').value = t; buildCandidates(); } };
+load();
+
+</script>
+</body>
+</html>

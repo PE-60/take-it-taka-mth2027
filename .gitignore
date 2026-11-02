@@ -62,3 +62,7 @@ __pycache__/
 venv/
 env/
 .DS_Store
+
+
+# exported data from the local instance of match viewer (just local data from loading the match)
+export/*
