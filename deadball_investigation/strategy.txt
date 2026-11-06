@@ -1,0 +1,42 @@
+We want to undestand when there a dead ball situations (D flag) - stop of play
+A dead ball interval has a begining and an end.
+
+For now we fix (assume) the following:
+    - The end of a D flag is determined by the smart-tagging data 
+
+-> Which smart tags resemble D-flags?
+    Tags with a 'Type': Throw-in, Corner Kick, Goal Kick, Free Kick, Kick Off (After Goal), Kick Off (Start)
+
+    They have 'timestamp' and 'end_timestamp', we'll take 'end_timestamp' or the average of the two (in between them), if the smart tag ends too far after the actual event.
+
+    This way we fix the end of the D flag interval.
+
+-> How to determine the start of the D flag interval?
+    Either:
+     1. we get some extra info for the beginning of the interval, or 
+     2. we get the leght of the D flag inteval and append it before the end.
+
+    As a first test, we want to infer the D-flag intervals from the broadcast replay lengths of the nearest replay before the smart tag, which tells us the end point of the D-flag interval. 
+
+    For this we need to synchronise the broadcast to the tactical video.
+    Then we need to get replays from the broadcast somehow - they have 
+
+    Why this is a BAD IDEA - there aren't transitions for the end of the replay. I.e. no clear or consistant visual cues for the replays straight from the video.
+
+    We won't use replays!
+    We will use missing homography + missing ball intervals from the broadcast - also maybe add missing ball intervals from the tactical vid as well.
+
+-> How do we determine more precisely the end of the D-flag interval?
+    Use ball velocity and acceleration: We want to flag the moment when the ball gets a big acceleration (i.e. it is kicked by a player, or thrown).
+    IMPORTANT: Only do this after we know where the D-flag interval roughly is! This is to replace the assumption of fixing the end of the interval to the endtimestamp of the smart tag.
+
+
+
+
+To use the broadcast, we need to synchronise it to the tactical video.
+How?
+
+
+
+
+    27:44

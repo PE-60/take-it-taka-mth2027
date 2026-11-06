@@ -13,9 +13,13 @@ Interactive viewer (match_viewer.html + viewer/ next to this script):
     python match_viewer.py --source broadcast --mode full --export --serve
     python match_viewer.py --serve                            # reopen without recomputing
 
+    # two viewers side by side (tactical + broadcast); different --port, or omit --port to auto-pick
+    python match_viewer.py --source tactical  --mode full --serve --port 8765
+    python match_viewer.py --source broadcast --mode full --serve --port 8766
+
 AR flag overlays (optional): put export/referee_signals_tactical.json next to the repo
 (or pass --referee-signals PATH). Built by: python -m referee_signals --video ... --out ...
-    
+
 Data layout (the repository's): data/tactical/ and data/broadcast/ next to this script.
 `--inspect` prints how the ATD is parsed.  See MATCH_VIEWER.md.
 """
@@ -1038,7 +1042,8 @@ def build_timeline(gt, pred, tags, atd, poss, hom, start, end, width):
 # ----------------------------------------------------------------------------
 # export for the interactive viewer (match_viewer.html)
 # ----------------------------------------------------------------------------
-def export_data(out_dir, src, video, start, end, fps, W, Hh, gt, pred, tags, atd, meta, home, hom, poss, flags, referee_doc=None):
+def export_data(out_dir, src, video, start, end, fps, W, Hh, gt, pred, tags, atd, meta, home, hom, poss, flags,
+                referee_doc=None):
     os.makedirs(out_dir, exist_ok=True)
     n = end - start + 1
     ids = atd["ids"] if atd else []
@@ -1125,6 +1130,11 @@ def export_data(out_dir, src, video, start, end, fps, W, Hh, gt, pred, tags, atd
     print(f"exported {n} frames -> {out_dir}  (data.bin {size:.1f} MB, meta.json)")
 
 
+def export_relpath(source, mode):
+    """Repo-relative export folder for a source/mode pair (what match_viewer.html takes as ?d=)."""
+    return f"export/{source}_{'full' if source == 'broadcast' else mode}"
+
+
 def server_root():
     """The folder the server has to serve from: the common parent of this script and the video.
     Written by --export into export/latest.json; defaults to this folder."""
@@ -1139,13 +1149,37 @@ def server_root():
     return HERE
 
 
-def serve(root, port):
-    """Static file server with HTTP Range support (needed for video seeking); opens match_viewer.html."""
+def pick_port(preferred, host="127.0.0.1", span=50):
+    """Return preferred if free, otherwise the next free port in [preferred, preferred+span)."""
+    import socket
+    for port in range(preferred, preferred + span):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind((host, port))
+                if port != preferred:
+                    print(f"port {preferred} busy, using {port}")
+                return port
+            except OSError:
+                continue
+    sys.exit(f"no free port in {preferred}..{preferred + span - 1}; pass a free --port")
+
+
+def serve(root, port, export_dir=None):
+    """Static file server with HTTP Range support (needed for video seeking); opens match_viewer.html.
+    export_dir: optional repo-relative folder (e.g. export/broadcast_full) pinned via ?d= so several
+    instances on different ports can show different sources at once."""
     import http.server
     import socketserver
     import webbrowser
     if not os.path.exists(os.path.join(HERE, "match_viewer.html")):
         sys.exit("match_viewer.html must sit next to match_viewer.py")
+    if export_dir:
+        abs_dir = export_dir if os.path.isabs(export_dir) else os.path.join(HERE, export_dir)
+        if not os.path.isdir(abs_dir):
+            sys.exit(f"no export at {export_dir}/ — run with --export first, e.g.\n"
+                     f"  python match_viewer.py --source … --mode … --export")
+        export_dir = os.path.relpath(abs_dir, HERE).replace(os.sep, "/")
 
     class H(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *a, **k):
@@ -1217,10 +1251,12 @@ def serve(root, port):
             if et not in (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
                 super().handle_error(request, client_address)
 
+    port = pick_port(port)
     with Srv(("127.0.0.1", port), H) as httpd:
         page = os.path.relpath(os.path.join(HERE, "match_viewer.html"), root).replace(os.sep, "/")
-        url = f"http://127.0.0.1:{port}/{page}"
-        print(f"serving {root}\nopen   {url}   (Ctrl+C to stop)")
+        qs = f"?d={export_dir}" if export_dir else ""
+        url = f"http://127.0.0.1:{port}/{page}{qs}"
+        print(f"serving {root}" + (f"  [{export_dir}]" if export_dir else "") + f"\nopen   {url}   (Ctrl+C to stop)")
         webbrowser.open(url)
         try:
             httpd.serve_forever()
@@ -1239,7 +1275,10 @@ def main():
     ap.add_argument("--inspect", action="store_true", help="print how the ATD files are parsed, then exit")
     ap.add_argument("--export", action="store_true", help="write export/<source>_<mode>/ for match_viewer.html instead of a video")
     ap.add_argument("--serve", action="store_true", help="start a local server and open match_viewer.html")
-    ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--port", type=int, default=8765,
+                    help="localhost port (default 8765); if busy, the next free port is used so several viewers can run in parallel")
+    ap.add_argument("--dir", help="export folder to open (e.g. export/broadcast_full). "
+                    "With --serve, also implied by --source/--mode when those flags are passed")
     ap.add_argument("--video")
     ap.add_argument("--gt")
     ap.add_argument("--atd")
@@ -1264,7 +1303,14 @@ def main():
     args = ap.parse_args()
     global HALVES, HALVES_EST
     if args.serve and not args.export:
-        serve(server_root(), args.port)
+        # Pin a specific export when the user asked for one; plain --serve still reopens latest.json.
+        if args.dir:
+            export_dir = args.dir
+        elif "--source" in sys.argv or "--mode" in sys.argv:
+            export_dir = export_relpath(args.source, args.mode)
+        else:
+            export_dir = None
+        serve(server_root(), args.port, export_dir=export_dir)
         return
     src = args.source
     broadcast = src == "broadcast"
@@ -1376,15 +1422,19 @@ def main():
     tl_groups, tl_flags = build_timeline(gt, pred, tags, atd, poss, hom, start, end, tl_w) if not args.no_timeline else ([], [])
     if args.export:
         out_dir = os.path.join(HERE, "export", f"{src}_{'full' if broadcast else args.mode}")
-        export_data(out_dir, src, video, start, end, src_fps, W, Hh, gt, pred, tags, atd, meta, home, hom, poss, tl_flags, referee_doc=referee_doc)
+        export_data(out_dir, src, video, start, end, src_fps, W, Hh, gt, pred, tags, atd, meta, home, hom, poss, tl_flags,
+                    referee_doc=referee_doc)
         root = os.path.commonpath([HERE, os.path.dirname(os.path.abspath(video))])
+        rel = os.path.relpath(out_dir, HERE).replace(os.sep, "/")
         with open(os.path.join(HERE, "export", "latest.json"), "w") as fh:
-            json.dump({"dir": os.path.relpath(out_dir, HERE).replace(os.sep, "/"), "root": root}, fh)
+            json.dump({"dir": rel, "root": root}, fh)
         cap.release()
         if args.serve:
-            serve(root, args.port)
+            serve(root, args.port, export_dir=rel)
         else:
-            print("now run:  python match_viewer.py --serve")
+            print(f"now run:  python match_viewer.py --serve --source {src}"
+                  + ("" if broadcast else f" --mode {args.mode}")
+                  + "\n  or:     python match_viewer.py --serve   # reopen this latest export")
         return
     writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), src_fps, (out_w, out_h))
     n_rows = sum(len(r) for _, r in tl_groups)
@@ -1459,7 +1509,6 @@ def main():
                     draw_detections(frame, dets, scale=s, thickness=max(1, t1))
             except Exception:
                 pass
-
 
         # ---------------- tracking
         players, ball, (bsp_f, bsp_d), heading = frame_tracking(atd, f)
