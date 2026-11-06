@@ -13,6 +13,9 @@ Interactive viewer (match_viewer.html + viewer/ next to this script):
     python match_viewer.py --source broadcast --mode full --export --serve
     python match_viewer.py --serve                            # reopen without recomputing
 
+AR flag overlays (optional): put export/referee_signals_tactical.json next to the repo
+(or pass --referee-signals PATH). Built by: python -m referee_signals --video ... --out ...
+    
 Data layout (the repository's): data/tactical/ and data/broadcast/ next to this script.
 `--inspect` prints how the ATD is parsed.  See MATCH_VIEWER.md.
 """
@@ -1035,7 +1038,7 @@ def build_timeline(gt, pred, tags, atd, poss, hom, start, end, width):
 # ----------------------------------------------------------------------------
 # export for the interactive viewer (match_viewer.html)
 # ----------------------------------------------------------------------------
-def export_data(out_dir, src, video, start, end, fps, W, Hh, gt, pred, tags, atd, meta, home, hom, poss, flags):
+def export_data(out_dir, src, video, start, end, fps, W, Hh, gt, pred, tags, atd, meta, home, hom, poss, flags, referee_doc=None):
     os.makedirs(out_dir, exist_ok=True)
     n = end - start + 1
     ids = atd["ids"] if atd else []
@@ -1100,6 +1103,22 @@ def export_data(out_dir, src, video, start, end, fps, W, Hh, gt, pred, tags, atd
         "has_z": bool(atd and atd["has_z"]), "has_ball_speed": bool(atd and atd["has_ball_speed"]),
         "bolt": BOLT_MS, "ball_radius": BALL_RADIUS_M,
     }
+    if referee_doc:
+        try:
+            from referee_signals.io import signal_events_for_meta
+            from referee_signals.schema import SIGNAL_STYLE
+            m["referee"] = {
+                "source": referee_doc.get("source", src),
+                "fps": referee_doc.get("fps", fps),
+                "officials": referee_doc.get("officials") or [],
+                "events": signal_events_for_meta(referee_doc, start, end),
+                "styles": SIGNAL_STYLE,
+            }
+            # Sidecar full document for debugging / re-import
+            with open(os.path.join(out_dir, "referee_signals.json"), "w") as fh:
+                json.dump(referee_doc, fh)
+        except Exception as e:
+            print(f"warning: could not attach referee signals to export: {e}")
     with open(os.path.join(out_dir, "meta.json"), "w") as fh:
         json.dump(m, fh)
     size = os.path.getsize(os.path.join(out_dir, "data.bin")) / 1e6
@@ -1238,6 +1257,8 @@ def main():
     ap.add_argument("--radius", type=float, default=1.0)
     ap.add_argument("--trail", type=float, default=1.5, help="ball trail length in seconds (0 = off)")
     ap.add_argument("--shape", action="store_true")
+    ap.add_argument("--referee-signals", help="path to referee_signals.json (AR flag detections)")
+    ap.add_argument("--no-referee", action="store_true", help="skip referee flag overlays even if a JSON is found")
     for flag in ("players", "ball", "pitch", "minimap", "tags", "timeline", "regions"):
         ap.add_argument(f"--no-{flag}", action="store_true")
     args = ap.parse_args()
@@ -1262,6 +1283,22 @@ def main():
     if broadcast and args.pred:
         print("--pred ignored: submissions are indexed to the tactical video, not the broadcast")
         args.pred = None
+
+    referee_doc = None
+    referee_by_frame = {}
+    if not args.no_referee:
+        try:
+            from referee_signals.io import find_signals_path, index_by_frame, load_signals
+            ref_path = find_signals_path(HERE, args.referee_signals, source=src)
+            if ref_path:
+                referee_doc = load_signals(ref_path)
+                referee_by_frame = index_by_frame(referee_doc)
+                print(f"referee     : {ref_path}  ({len(referee_doc.get('detections') or [])} detections)")
+            else:
+                print("referee     : (not found, skipped)")
+        except Exception as e:
+            print(f"referee     : (load failed: {e})")
+
     for k, v in (("video", video), ("ground truth", gt_path), ("homography", hom_path),
                  ("ATD raw", atd_path), ("ATD xml", atd_meta), ("smart tags", tags_path)):
         print(f"{k:13s}: {v or '(not found, skipped)'}")
@@ -1339,7 +1376,7 @@ def main():
     tl_groups, tl_flags = build_timeline(gt, pred, tags, atd, poss, hom, start, end, tl_w) if not args.no_timeline else ([], [])
     if args.export:
         out_dir = os.path.join(HERE, "export", f"{src}_{'full' if broadcast else args.mode}")
-        export_data(out_dir, src, video, start, end, src_fps, W, Hh, gt, pred, tags, atd, meta, home, hom, poss, tl_flags)
+        export_data(out_dir, src, video, start, end, src_fps, W, Hh, gt, pred, tags, atd, meta, home, hom, poss, tl_flags, referee_doc=referee_doc)
         root = os.path.commonpath([HERE, os.path.dirname(os.path.abspath(video))])
         with open(os.path.join(HERE, "export", "latest.json"), "w") as fh:
             json.dump({"dir": os.path.relpath(out_dir, HERE).replace(os.sep, "/"), "root": root}, fh)
@@ -1412,6 +1449,17 @@ def main():
                 a, b = project(Hm, [[x_from, -0.035], [x_to, -0.035]]) * s
                 if good_px(a) and good_px(b):
                     cv2.arrowedLine(frame, (int(a[0]), int(a[1])), (int(b[0]), int(b[1])), col, t2, cv2.LINE_AA, tipLength=0.3)
+
+        # ---------------- referee flag overlays (pixel space; independent of ATD)
+        if referee_by_frame:
+            try:
+                from referee_signals.overlay import draw_detections
+                dets = referee_by_frame.get(f) or []
+                if dets:
+                    draw_detections(frame, dets, scale=s, thickness=max(1, t1))
+            except Exception:
+                pass
+
 
         # ---------------- tracking
         players, ball, (bsp_f, bsp_d), heading = frame_tracking(atd, f)
