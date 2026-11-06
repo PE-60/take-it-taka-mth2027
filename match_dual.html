@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Match viewer · tactical + broadcast</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0f1012; --panel:#17191c; --panel2:#1d2024; --line:#2a2e33; --line2:#3a3f46;
+  --fg:#e8eaed; --muted:#9aa0a8; --dim:#5f656d; --warn:#f5d73c; --good:#5adc5a; --bad:#f03c3c;
+  --tagT:#8fd0ff; --tagB:#ffc46b; --diff:#e650e6;
+  font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; font-size:13px; line-height:1.35;
+  font-variant-numeric:tabular-nums; color:var(--fg); background:var(--bg);
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg)}
+body{display:grid;grid-template-rows:44px minmax(0,1fr) auto;height:100vh;overflow:hidden}
+body.resizing{user-select:none} body.resizing iframe{pointer-events:none}
+.mono{font-family:"JetBrains Mono",ui-monospace,Consolas,monospace}
+.lbl{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}
+.hint{color:var(--dim);font-size:11.5px}
+button,select,input[type=range]{font:inherit;color:var(--fg)}
+button{background:var(--panel2);border:1px solid var(--line2);border-radius:5px;padding:3px 9px;cursor:pointer;white-space:nowrap}
+button:hover{border-color:var(--muted)} button.on{border-color:var(--good);color:var(--good)} button.warn{border-color:var(--warn);color:var(--warn)}
+select{background:var(--panel2);border:1px solid var(--line2);border-radius:5px;padding:2px 6px}
+kbd{font:500 10.5px "JetBrains Mono",monospace;background:#23272c;border:1px solid var(--line2);border-bottom-width:2px;border-radius:3px;padding:0 4px;color:var(--muted)}
+.tagT{color:var(--tagT);font-weight:600} .tagB{color:var(--tagB);font-weight:600} .tagD{color:var(--diff);font-weight:600}
+#hdr{display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--line);background:var(--panel);white-space:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+#hdr::-webkit-scrollbar{display:none}
+#hdr .title{font-weight:600} #hdr .sp{flex:1;min-width:8px} #hdr .grp{display:flex;gap:4px;align-items:center}
+#readout{display:flex;gap:12px;align-items:baseline;font-size:12px}
+#panes{display:grid;grid-template-columns:minmax(0,var(--a,1fr)) 5px minmax(0,var(--b,1fr));grid-template-rows:minmax(0,1fr);min-height:0}
+body.stacked #panes{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,var(--a,1fr)) 5px minmax(0,var(--b,1fr))}
+.pane{position:relative;min-width:0;min-height:0;background:#000}
+.pane iframe{width:100%;height:100%;border:0;display:block}
+.pane .nocp{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:none;background:rgba(15,16,18,.88);border:1px solid var(--line2);padding:8px 14px;border-radius:8px;color:var(--warn);pointer-events:none;text-align:center}
+.pane.lead::after{content:'leading';position:absolute;right:8px;bottom:8px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--good);background:rgba(15,16,18,.8);border:1px solid var(--line);border-radius:4px;padding:1px 6px;pointer-events:none}
+#paneSplit{cursor:col-resize;background:var(--line)} body.stacked #paneSplit{cursor:row-resize} #paneSplit:hover,#paneSplit.on{background:var(--muted)}
+#cmp{--lblw:150px;position:relative;border-top:1px solid var(--line);background:var(--panel);padding:8px 12px 10px;display:flex;flex-direction:column;gap:4px;max-height:42vh;min-height:0}
+#cmp.sized{max-height:none}
+#cmpSplit{position:absolute;left:0;right:0;top:-3px;height:7px;cursor:row-resize;z-index:3} #cmpSplit:hover,#cmpSplit.on{background:rgba(255,255,255,.18)}
+#cmpctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;position:relative;flex:none} #cmpctl .sp{flex:1}
+#cmpbody{flex:1 1 auto;min-height:40px;overflow-y:auto;overflow-x:hidden;display:grid;grid-template-columns:var(--lblw) 6px minmax(0,1fr);align-items:start}
+#lblSplit{align-self:stretch;cursor:col-resize;border-right:1px solid var(--line);margin-right:2px} #lblSplit:hover,#lblSplit.on{border-right-color:var(--muted)}
+#labels{position:relative;overflow:hidden}
+#labels div{position:absolute;left:0;right:0;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1}
+#labels div.grp{color:var(--dim);letter-spacing:.06em;text-transform:uppercase;font-size:10px}
+#cv{position:relative} #cmpc{display:block;width:100%;cursor:crosshair} #cmpo{position:absolute;left:0;top:0;pointer-events:none}
+#tip{position:fixed;pointer-events:none;background:rgba(15,16,18,.94);border:1px solid var(--line2);border-radius:6px;padding:6px 9px;font-size:12px;display:none;z-index:9;white-space:nowrap}
+.pop{position:absolute;top:100%;margin-top:4px;max-height:60vh;overflow:auto;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:10px 12px;display:none;z-index:8;min-width:280px;box-shadow:0 8px 24px rgba(0,0,0,.5);white-space:normal}
+#rowpop{right:0;bottom:100%;top:auto;margin:0 0 4px} #anchorpop{position:fixed;top:48px;right:auto}
+.pop .grp{margin:8px 0 2px}
+.chk{display:flex;align-items:center;gap:7px;padding:2px 0;cursor:pointer}
+.arow{display:grid;grid-template-columns:1fr auto auto auto auto;gap:6px;align-items:center;padding:3px 0;border-bottom:1px solid var(--line)}
+.presets{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px}
+#err{position:fixed;inset:60px 20% auto;background:var(--panel2);border:1px solid var(--bad);border-radius:8px;padding:14px 18px;display:none;z-index:30}
+</style>
+</head>
+<body>
+<header id="hdr">
+  <span class="title">Dual viewer</span>
+  <button id="bPlay" title="space">▶ play</button>
+  <select id="speed" title="playback speed (both)"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select>
+  <span class="sp"></span>
+  <div id="readout" class="mono"><span><span class="tagT">T</span> <span id="rT">-</span></span><span><span class="tagB">B</span> <span id="rB">-</span></span><span id="rOff" class="hint"></span></div>
+  <span class="sp"></span>
+  <div class="grp">
+    <button id="bLink" title="keep both videos in sync (K)">⛓ linked</button>
+    <button id="bN-25" title="broadcast 1 s earlier against tactical (this segment)">−1s</button><button id="bN-1" title="broadcast 1 frame earlier">−1f</button>
+    <button id="bN1" title="broadcast 1 frame later">+1f</button><button id="bN25" title="broadcast 1 s later against tactical (this segment)">+1s</button>
+    <button id="bAnchor" title="unlink, line up both videos on the same moment, then press this to store the pair as a sync anchor">anchor here</button>
+    <button id="bAnchors">anchors ▾</button>
+  </div>
+  <span class="lbl">axis</span>
+  <select id="axis" title="which video's frames the comparison timeline runs on"><option value="t">tactical</option><option value="b">broadcast</option></select>
+  <button id="bStack" title="side by side / stacked">⇅</button>
+</header>
+<div id="anchorpop" class="pop"></div>
+
+<div id="panes">
+  <div class="pane" id="paneT"><iframe title="tactical"></iframe><div class="nocp">no tactical counterpart for this broadcast frame<br><span class="hint">replay / halftime cut / outside the export</span></div></div>
+  <div id="paneSplit" title="drag to resize · double-click to reset"></div>
+  <div class="pane" id="paneB"><iframe title="broadcast"></iframe><div class="nocp">no broadcast counterpart for this tactical frame<br><span class="hint">cut from the broadcast / outside the export</span></div></div>
+</div>
+
+<div id="cmp">
+  <div id="cmpSplit" title="drag to resize · double-click to reset"></div>
+  <div id="cmpctl">
+    <span class="lbl">comparison</span>
+    <span class="hint"><span class="tagT">T</span> tactical · <span class="tagB">B</span> broadcast mapped through the sync · <span class="tagD">Δ</span> disagreement · hatched = no counterpart · click = seek · drag = zoom · wheel = zoom · ⇧ wheel = scroll</span>
+    <span class="sp"></span>
+    <span class="lbl">row h</span><input type="range" id="rowH" min="6" max="28" step="1" value="12" style="width:70px">
+    <button id="bRows">rows ▾</button><div id="rowpop" class="pop"></div>
+  </div>
+  <div id="cmpbody"><div id="labels"></div><div id="lblSplit"></div><div id="cv"><canvas id="cmpc"></canvas><canvas id="cmpo"></canvas></div></div>
+</div>
+<div id="tip"></div>
+<div id="err"></div>
+
+<script type="module">
+const $ = s => document.querySelector(s);
+const q = new URLSearchParams(location.search);
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const other = id => id === 't' ? 'b' : 't';
+const NAME = { t: 'tactical', b: 'broadcast' };
+const TAGC = { t: '#8fd0ff', b: '#ffc46b' };
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+};
+const KEY = 'pv:dual:' + q.get('t') + '|' + q.get('b');
+const RG = 2, GG = 10, OVH = 14;
+const DEFAULT_ROWS = ['GT', 'PRED', 'NAIVE', 'L&H', 'RESTART', 'KICK', 'BALL LOST', 'BALL SPEED', 'COUNT ≠ 22', 'HOMOGRAPHY'];
+const DEFAULT_PAIRS = [['L&H', 'L&H'], ['GT', 'L&H']];
+const PRESETS = {
+  possession: ['GT', 'PRED', 'NAIVE', 'L&H', 'SEGMENT', 'MINE', 'RESTART', 'KICK'],
+  'data quality': ['BALL LOST', 'BALL SPEED', 'BALL JUMP', 'PLAYER JUMP', 'DROPOUT <0.5 s', 'VANISH/APPEAR', 'COUNT ≠ 22', '› BOLT', 'HOMOGRAPHY'],
+  minimal: ['GT', 'L&H', 'BALL LOST', 'HOMOGRAPHY'],
+};
+
+function fail(msg) { const e = $('#err'); e.innerHTML = msg; e.style.display = 'block'; }
+
+// ---------------------------------------------------------------- frame mapping
+// Anchors are pairs {t, b} of video frames showing the same moment. From an anchor up to the
+// next one, b = t + (anchor.b - anchor.t). Where the next segment starts earlier on the other
+// timeline than this one would reach, the overlap has no counterpart (content cut on that side).
+class SyncMap {
+  constructor(anchors = []) { this.set(anchors); }
+  set(a) { this.A = a.map(x => ({ ...x })).sort((p, r) => p.t - r.t); }
+  seg(f, s) { let k = 0; for (let i = 0; i < this.A.length; i++) if (this.A[i][s] <= f) k = i; return k; }
+  offsetAt(f, s) { if (!this.A.length) return 0; const k = this.seg(f, s); return this.A[k][other(s)] - this.A[k][s]; }
+  map(f, s) {
+    const A = this.A; if (!A.length) return f;
+    const d = other(s), k = this.seg(f, s), g = f - A[k][s] + A[k][d];
+    return k + 1 < A.length && g >= A[k + 1][d] ? null : g;
+  }
+  // the parts of [a, b] on timeline s that map, each with dst = src + off
+  pieces(s, a, b) {
+    const A = this.A; if (!A.length) return [{ a, b, off: 0 }];
+    const d = other(s), out = [];
+    for (let k = 0; k < A.length; k++) {
+      const off = A[k][d] - A[k][s], lo = k === 0 ? -Infinity : A[k][s];
+      const hi = k + 1 < A.length ? Math.min(A[k + 1][s], A[k + 1][d] - off) - 1 : Infinity;
+      const pa = Math.max(a, lo), pb = Math.min(b, hi); if (pb >= pa) out.push({ a: pa, b: pb, off });
+    }
+    return out;
+  }
+}
+const sync = new SyncMap();
+let fileAnchors = [];
+async function loadSync() {
+  const url = q.get('sync');
+  if (url) {
+    try { const j = await (await fetch(url, { cache: 'no-store' })).json(); fileAnchors = (j.anchors || []).map(a => ({ t: a.tactical, b: a.broadcast, label: a.label || 'anchor' })); }
+    catch (e) { console.warn('could not read sync file', url, e); }
+  }
+  sync.set(LS.get(KEY + ':anchors', null) || fileAnchors);
+}
+function anchorsChanged() { LS.set(KEY + ':anchors', sync.A); renderAnchors(); updateReadout(true); redraw(); if (linked) seekFollower(); }
+function addAnchor(t, b, label) {
+  // drop anchors that would break the ordering, or that sit within 10 s of the new one
+  const keep = sync.A.filter(x => Math.abs(x.t - t) > 10 * fps && (x.t < t) === (x.b < b));
+  keep.push({ t, b, label }); sync.set(keep); anchorsChanged();
+}
+function nudge(d) {
+  const T = curAbs(panes.t);
+  if (!sync.A.length) { addAnchor(T, T + d, 'manual'); return; }
+  const A = sync.A, k = sync.seg(T, 't'), nb = A[k].b + d;
+  if ((k > 0 && nb <= A[k - 1].b) || (k + 1 < A.length && nb >= A[k + 1].b)) return;
+  A[k].b = nb; anchorsChanged();
+}
+
+// ---------------------------------------------------------------- panes
+const panes = { t: { id: 't', el: $('#paneT') }, b: { id: 'b', el: $('#paneB') } };
+let fps = 25, ready = false, linked = true, leader = 't', ref = 't';
+const expect = { t: null, b: null }, quiet = { t: 0, b: 0 };
+const curAbs = p => p.ds.start + p.pv.cur;
+const inRange = (p, f) => f !== null && f >= p.ds.start && f <= p.ds.end;
+const fmtT = f => { const s = Math.max(0, f / fps); return `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`; };
+
+function openPane(p) {
+  p.frame = p.el.querySelector('iframe'); p.dir = q.get(p.id);
+  return new Promise(res => {
+    p.frame.addEventListener('load', () => {
+      const w = p.frame.contentWindow;
+      const done = () => { p.win = w; p.pv = w.__pv; p.v = w.__pv.video; p.ds = w.__pv.ds; res(p); };
+      if (w.__pv && w.__pv.ready) done(); else w.addEventListener('pv:ready', done, { once: true });
+    }, { once: true });
+    p.frame.src = 'match_viewer.html?embed=1&d=' + encodeURIComponent(p.dir);
+  });
+}
+function setNocp(p, on) { p.el.querySelector('.nocp').style.display = on ? 'block' : 'none'; }
+function quietPlay(p) { quiet[p.id] = performance.now() + 500; p.v.play().catch(() => {}); }
+function quietPause(p) { quiet[p.id] = performance.now() + 500; p.v.pause(); }
+// follower position (seconds) for the leader's current position, or null when there is none
+function targetTime(fid) {
+  const L = panes[leader], F = panes[fid], lf = L.v.currentTime * fps, fl = Math.floor(lf);
+  const g = sync.map(fl, leader); if (!inRange(F, g)) return null;
+  return (g + lf - fl) / fps;
+}
+function seekFollower() {
+  const F = panes[other(leader)], tt = targetTime(F.id);
+  setNocp(F, tt === null); setNocp(panes[leader], false);
+  if (tt === null) { if (!F.v.paused) quietPause(F); return; }
+  expect[F.id] = tt; F.v.currentTime = tt;
+}
+function setLeader(id) { leader = id; for (const p of Object.values(panes)) p.el.classList.toggle('lead', linked && p.id === id); }
+function setLinked(on) {
+  linked = on; const b = $('#bLink'); b.textContent = on ? '⛓ linked' : 'unlinked'; b.className = on ? 'on' : 'warn';
+  setLeader(leader); if (on) seekFollower(); else { setNocp(panes.t, false); setNocp(panes.b, false); }
+  updateReadout(true);
+}
+function wirePane(p) {
+  p.v.addEventListener('seeked', () => {
+    const e = expect[p.id]; expect[p.id] = null;
+    if (e !== null && Math.abs(p.v.currentTime - e) < 0.08) return;
+    setLeader(p.id); if (linked) seekFollower();
+  });
+  p.v.addEventListener('play', () => {
+    if (performance.now() < quiet[p.id]) return;
+    setLeader(p.id);
+    if (linked) { const F = panes[other(p.id)], tt = targetTime(F.id); setNocp(F, tt === null); if (tt !== null) { expect[F.id] = tt; F.v.currentTime = tt; quietPlay(F); } }
+    updatePlay();
+  });
+  p.v.addEventListener('pause', () => { if (performance.now() >= quiet[p.id] && linked) quietPause(panes[other(p.id)]); updatePlay(); });
+  p.win.addEventListener('pv:changed', scheduleRedraw);
+}
+function updatePlay() { $('#bPlay').textContent = panes.t.v.paused && panes.b.v.paused ? '▶ play' : '❚❚ pause'; }
+function togglePlay() { const L = panes[leader]; if (L.v.paused) L.v.play(); else { L.v.pause(); if (!linked) panes[other(leader)].v.pause(); } }
+
+// keep the follower on the leader while playing: hard seek on big drift, rate trim on small drift
+function tick() {
+  requestAnimationFrame(tick);
+  if (!ready) return;
+  const L = panes[leader], F = panes[other(leader)];
+  if (linked && !L.v.paused) {
+    const tt = targetTime(F.id); setNocp(F, tt === null);
+    if (tt === null) { if (!F.v.paused) quietPause(F); }
+    else if (!F.v.seeking) {
+      if (F.v.paused) { expect[F.id] = tt; F.v.currentTime = tt; quietPlay(F); }
+      else {
+        const drift = F.v.currentTime - tt;
+        if (Math.abs(drift) > 0.3) { const lead = tt + 0.15 * L.v.playbackRate; expect[F.id] = lead; F.v.currentTime = lead; }
+        else F.v.playbackRate = L.v.playbackRate * clamp(1 - drift * 0.8, 0.9, 1.1);
+      }
+    }
+  } else if (F.v.paused && F.v.playbackRate !== L.v.playbackRate) F.v.playbackRate = L.v.playbackRate;
+  updateReadout(); drawCursors();
+}
+
+let lastReadout = '';
+function updateReadout(force) {
+  const T = curAbs(panes.t), B = curAbs(panes.b), off = sync.offsetAt(T, 't');
+  const k = sync.A.length ? sync.seg(T, 't') : -1, seg = k >= 0 ? sync.A[k].label : 'no sync anchors (offset 0)';
+  const actual = B - T;
+  const s = `${T}|${B}|${off}|${seg}|${linked}`;
+  if (!force && s === lastReadout) return; lastReadout = s;
+  $('#rT').textContent = `${T} · ${fmtT(T)}`; $('#rB').textContent = `${B} · ${fmtT(B)}`;
+  $('#rOff').innerHTML = `offset ${off >= 0 ? '+' : ''}${off} f (${(off / fps).toFixed(2)} s) · ${seg}` +
+    (!linked ? ` · <span style="color:var(--warn)">now ${actual >= 0 ? '+' : ''}${actual} f (${actual - off >= 0 ? '+' : ''}${actual - off} vs sync)</span>` : '');
+}
+
+// ---------------------------------------------------------------- anchors popover
+function renderAnchors() {
+  const pop = $('#anchorpop');
+  pop.innerHTML = `<div class="lbl" style="margin-bottom:6px">sync anchors <span class="hint">(${q.get('sync') || 'no sync file'})</span></div>` +
+    (sync.A.length ? '' : '<div class="hint">none: both videos run with offset 0. Unlink, line them up, press "anchor here".</div>');
+  for (const [i, a] of sync.A.entries()) {
+    const off = a.b - a.t, row = document.createElement('div'); row.className = 'arow';
+    row.innerHTML = `<span>${a.label}</span><span class="mono"><span class="tagT">T</span> ${a.t}</span><span class="mono"><span class="tagB">B</span> ${a.b}</span><span class="mono hint">${off >= 0 ? '+' : ''}${off}</span><span><button data-go>go</button> <button data-del>×</button></span>`;
+    row.querySelector('[data-go]').onclick = () => { const T = panes.t; T.v.pause(); T.pv.seek(clamp(a.t - T.ds.start, 0, T.ds.n - 1)); };
+    row.querySelector('[data-del]').onclick = () => { sync.A.splice(i, 1); anchorsChanged(); };
+    pop.appendChild(row);
+  }
+  const bar = document.createElement('div'); bar.style.cssText = 'display:flex;gap:6px;margin-top:8px;flex-wrap:wrap';
+  bar.innerHTML = '<button data-reset>reset to sync file</button><button data-save>download sync.json</button>';
+  bar.querySelector('[data-reset]').onclick = () => { localStorage.removeItem(KEY + ':anchors'); sync.set(fileAnchors); anchorsChanged(); };
+  bar.querySelector('[data-save]').onclick = () => {
+    const doc = { fps, anchors: sync.A.map(a => ({ label: a.label, tactical: a.t, broadcast: a.b })), note: 'from each anchor up to the next, broadcast_frame = tactical_frame + (broadcast - tactical)' };
+    const el = document.createElement('a'); el.href = URL.createObjectURL(new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' })); el.download = 'sync.json'; el.click();
+  };
+  pop.appendChild(bar);
+}
+
+// ---------------------------------------------------------------- comparison timeline
+let view = [0, 0], RH = 12, selected = null, pairs = null, drag = null, redrawQueued = false;
+const hatchPat = (() => { const c = document.createElement('canvas'); c.width = c.height = 6; const g = c.getContext('2d'); g.fillStyle = '#1b1d20'; g.fillRect(0, 0, 6, 6); g.strokeStyle = '#30343a'; g.beginPath(); g.moveTo(0, 6); g.lineTo(6, 0); g.stroke(); return c; })();
+const fullRange = () => [panes[ref].ds.start, panes[ref].ds.end];
+const fx = (f, W) => (f - view[0]) / (view[1] - view[0] + 1) * W;
+const xf = (x, W) => clamp(Math.floor(view[0] + x / W * (view[1] - view[0] + 1)), view[0], view[1]);
+const rowOf = (p, name) => p.pv.ROWS.find(r => !r.grp && r.kind !== 'slot' && r.name === name);
+function allNames() {
+  const out = new Map();
+  for (const id of ['t', 'b']) { let g = ''; for (const r of panes[id].pv.ROWS) { if (r.grp) { g = r.grp; continue; } if (r.kind !== 'slot' && !out.has(r.name)) out.set(r.name, g); } }
+  return out;
+}
+function lanes() {
+  const out = [], names = allNames();
+  const ds = pairs.map(pr => ({ pr, ra: rowOf(panes.t, pr[0]), rb: rowOf(panes.b, pr[1]) })).filter(x => x.ra && x.rb && x.ra.kind === 'label' && x.rb.kind === 'label');
+  if (ds.length) { out.push({ grp: 'compare' }); for (const x of ds) out.push({ kind: 'diff', ...x }); }
+  let g = null;
+  for (const [name, grp] of names) {
+    if (!selected.includes(name)) continue;
+    if (grp !== g) { out.push({ grp }); g = grp; }
+    for (const id of ['t', 'b']) { const row = rowOf(panes[id], name); if (row) out.push({ kind: 'row', pane: id, row, name }); }
+  }
+  return out;
+}
+function scheduleRedraw() { if (redrawQueued) return; redrawQueued = true; requestAnimationFrame(() => { redrawQueued = false; redraw(); }); }
+function drawRowLane(g, lane, y, W) {
+  const p = panes[lane.pane];
+  const pieces = lane.pane === ref ? [{ a: view[0], b: view[1], off: 0 }] : sync.pieces(ref, view[0], view[1]);
+  for (const pc of pieces) {
+    const a = Math.max(pc.a, p.ds.start - pc.off), b = Math.min(pc.b, p.ds.end - pc.off); if (b < a) continue;
+    const x0 = Math.round(fx(a, W)), w = Math.round(fx(b + 1, W)) - x0; if (w < 1) continue;
+    g.drawImage(p.pv.rowStrip(lane.row, a + pc.off - p.ds.start, b + pc.off - p.ds.start, w), 0, 0, w, 1, x0, y, w, RH);
+  }
+}
+const norm = v => (v && v !== 'X' && v !== '?') ? v : null;
+// per pixel: share of frames (both sides labelled) where the two label rows disagree
+function drawDiffLane(g, lane, y, W) {
+  const T = panes.t, B = panes.b, span = view[1] - view[0] + 1, per = span / W, step = Math.max(1, Math.floor(per / 12));
+  const c = document.createElement('canvas'); c.width = W; c.height = 1; const cg = c.getContext('2d'), img = cg.createImageData(W, 1), px = img.data;
+  let tot = 0, dis = 0;
+  for (let i = 0; i < W; i++) {
+    const a = view[0] + Math.floor(i * per), b = Math.max(a + 1, view[0] + Math.floor((i + 1) * per)); let n = 0, d = 0, un = 0;
+    for (let f = a; f < b; f += step) {
+      const tf = ref === 't' ? f : sync.map(f, 'b'), bf = ref === 'b' ? f : sync.map(f, 't');
+      if (!inRange(T, tf) || !inRange(B, bf)) { un++; continue; }
+      const la = norm(lane.ra.get(tf - T.ds.start)), lb = norm(lane.rb.get(bf - B.ds.start)); if (!la || !lb) continue;
+      n++; if (la !== lb) d++;
+    }
+    tot += n; dis += d; const o = i * 4;
+    if (n) { const k = d / n; const c0 = k ? [34 + (230 - 34) * k, 34 + (80 - 34) * k, 34 + (230 - 34) * k] : [38, 62, 40]; px[o] = c0[0]; px[o + 1] = c0[1]; px[o + 2] = c0[2]; px[o + 3] = 255; }
+    else if (!un) { px[o] = px[o + 1] = px[o + 2] = 34; px[o + 3] = 255; }
+  }
+  cg.putImageData(img, 0, 0); g.drawImage(c, 0, 0, W, 1, 0, y, W, RH);
+  lane.agree = tot ? 1 - dis / tot : null;
+}
+function redraw() {
+  if (!ready) return;
+  const c = $('#cmpc'), W = Math.max(50, c.clientWidth), dpr = window.devicePixelRatio || 1, L = lanes();
+  let h = OVH + 8; for (const l of L) h += l.grp ? GG : RH + RG;
+  c.width = W * dpr; c.height = h * dpr; c.style.height = h + 'px';
+  const o = $('#cmpo'); o.width = W * dpr; o.height = h * dpr; o.style.width = W + 'px'; o.style.height = h + 'px';
+  const g = c.getContext('2d'); g.scale(dpr, dpr); g.fillStyle = '#17191c'; g.fillRect(0, 0, W, h);
+  const hatch = g.createPattern(hatchPat, 'repeat');
+  const labels = $('#labels'); labels.innerHTML = ''; labels.style.height = h + 'px';
+  const mk = (html, yy, cls, title) => { const d = document.createElement('div'); d.innerHTML = html; d.title = title || d.textContent; d.style.top = yy + 'px'; if (cls) d.className = cls; labels.appendChild(d); };
+  // overview: whole axis, dark where the other video has a counterpart, hatched where not
+  const [f0, f1] = fullRange(), O = panes[other(ref)], fullW = f => (f - f0) / (f1 - f0 + 1) * W;
+  g.fillStyle = hatch; g.fillRect(0, 0, W, OVH);
+  g.fillStyle = '#2b4450';
+  for (const pc of sync.pieces(ref, f0, f1)) { const a = Math.max(pc.a, O.ds.start - pc.off), b = Math.min(pc.b, O.ds.end - pc.off); if (b >= a) g.fillRect(fullW(a), 0, Math.max(1, fullW(b + 1) - fullW(a)), OVH); }
+  g.fillStyle = 'rgba(255,255,255,.14)'; g.fillRect(fullW(view[0]), 0, Math.max(2, fullW(view[1] + 1) - fullW(view[0])), OVH);
+  g.strokeStyle = '#fff'; g.strokeRect(fullW(view[0]) + .5, .5, Math.max(2, fullW(view[1] + 1) - fullW(view[0])) - 1, OVH - 1);
+  for (const a of sync.A) { g.fillStyle = '#fff'; g.fillRect(fullW(a[ref]) - 1, 0, 2, OVH); }
+  mk(`whole ${NAME[ref]} · ${NAME[other(ref)]} coverage`, 2, 'grp');
+  let y = OVH + 8;
+  for (const l of L) {
+    if (l.grp) { mk(l.grp, y + 1, 'grp'); y += GG; continue; }
+    g.fillStyle = hatch; g.fillRect(0, y, W, RH);
+    const ly = y + Math.max(0, (RH - 10) / 2);
+    if (l.kind === 'diff') { drawDiffLane(g, l, y, W); mk(`<span class="tagD">Δ</span> <span class="tagT">T</span> ${l.pr[0]} · <span class="tagB">B</span> ${l.pr[1]}` + (l.agree !== null ? ` <span style="color:var(--fg)">${(l.agree * 100).toFixed(0)}%</span>` : ''), ly, null, `T ${l.pr[0]} vs B ${l.pr[1]}: dark green = agree, magenta = share of frames that disagree, ${l.agree !== null ? (l.agree * 100).toFixed(1) + '% agreement in view' : 'no overlap in view'}`); }
+    else { drawRowLane(g, l, y, W); mk(`<span class="tag${l.pane.toUpperCase()}">${l.pane.toUpperCase()}</span> ${l.name}`, ly, null, `${NAME[l.pane]} · ${l.name}`); }
+    y += RH + RG;
+  }
+  for (const a of sync.A) if (a[ref] >= view[0] && a[ref] <= view[1]) { const x = fx(a[ref], W); g.strokeStyle = 'rgba(255,255,255,.6)'; g.setLineDash([2, 3]); g.beginPath(); g.moveTo(x + .5, OVH + 2); g.lineTo(x + .5, h); g.stroke(); g.setLineDash([]); }
+  g.fillStyle = '#9aa0a8'; g.font = '11px Inter'; g.textAlign = 'right';
+  g.fillText(`${NAME[ref]} ${view[0]} - ${view[1]}  (${fmtT(view[0])} - ${fmtT(view[1])}, ${((view[1] - view[0]) / fps).toFixed(0)} s)`, W - 2, OVH + 7); g.textAlign = 'left';
+  lastCursor = ''; drawCursors();
+}
+let lastCursor = '';
+function drawCursors() {
+  const o = $('#cmpo'); if (!o.width) return;
+  const R = panes[ref], O = panes[other(ref)], rc = curAbs(R), oc = curAbs(O), om = sync.map(oc, other(ref));
+  const key = `${rc}|${om}|${view}|${o.width}`; if (key === lastCursor) return; lastCursor = key;
+  const dpr = window.devicePixelRatio || 1, W = o.width / dpr, H = o.height / dpr, g = o.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const [f0, f1] = fullRange(), fullW = f => (f - f0) / (f1 - f0 + 1) * W;
+  const line = (x, color, dash, y0) => { g.strokeStyle = color; g.setLineDash(dash); g.beginPath(); g.moveTo(x + .5, y0); g.lineTo(x + .5, H); g.stroke(); g.setLineDash([]); };
+  g.fillStyle = '#fff'; g.fillRect(fullW(rc), 0, 1, OVH);
+  if (rc >= view[0] && rc <= view[1]) line(fx(rc, W), '#fff', [], OVH + 2);
+  if (om !== null && om !== rc && om >= view[0] && om <= view[1]) line(fx(om, W), TAGC[other(ref)], [4, 3], OVH + 2);
+}
+function seekRef(f) {
+  const R = panes[ref]; R.v.pause(); panes[other(ref)].v.pause();
+  R.pv.seek(clamp(f - R.ds.start, 0, R.ds.n - 1));
+}
+function setupTimeline() {
+  const c = $('#cmpc');
+  c.addEventListener('mousedown', e => {
+    if (e.offsetY < OVH + 2) { const [f0, f1] = fullRange(); seekRef(Math.round(f0 + e.offsetX / c.clientWidth * (f1 - f0))); return; }
+    drag = { x0: e.offsetX, x1: e.offsetX };
+  });
+  window.addEventListener('mousemove', e => { if (!drag) return; drag.x1 = e.clientX - c.getBoundingClientRect().left; const o = $('#cmpo').getContext('2d'); lastCursor = ''; drawCursors(); const [a, b] = [drag.x0, drag.x1].sort((p, r) => p - r); o.fillStyle = 'rgba(50,170,235,.18)'; o.fillRect(a, OVH + 2, b - a, o.canvas.height); });
+  window.addEventListener('mouseup', () => {
+    if (!drag) return; const W = c.clientWidth, [a, b] = [drag.x0, drag.x1].sort((p, r) => p - r); drag = null;
+    if (b - a < 4) seekRef(xf(a, W)); else { view = [xf(a, W), Math.max(xf(a, W) + 10, xf(b, W))]; redraw(); }
+  });
+  c.addEventListener('wheel', e => {
+    e.preventDefault();
+    if (e.shiftKey) { $('#cmpbody').scrollTop += e.deltaY || e.deltaX; return; }
+    const W = c.clientWidth, [f0, f1] = fullRange(), r = xf(e.offsetX, W), span = view[1] - view[0], k = e.deltaY > 0 ? 1.25 : .8;
+    const ns = clamp(span * k, 10, f1 - f0); let a = r - (r - view[0]) * ns / span; a = clamp(a, f0, f1 - ns);
+    view = [Math.round(a), Math.round(a + ns)]; redraw();
+  }, { passive: false });
+  c.addEventListener('mousemove', e => {
+    const W = c.clientWidth, f = e.offsetY < OVH + 2 ? Math.round(fullRange()[0] + e.offsetX / W * (fullRange()[1] - fullRange()[0])) : xf(e.offsetX, W), g = sync.map(f, ref), O = panes[other(ref)], tip = $('#tip');
+    tip.style.display = 'block'; tip.style.left = (e.clientX + 12) + 'px'; tip.style.top = (e.clientY - 56) + 'px';
+    tip.innerHTML = `<span class="tag${ref.toUpperCase()}">${ref.toUpperCase()}</span> <b class="mono">${f}</b> · ${fmtT(f)}<br>` +
+      (inRange(O, g) ? `<span class="tag${other(ref).toUpperCase()}">${other(ref).toUpperCase()}</span> <b class="mono">${g}</b> · ${fmtT(g)} · offset ${g - f >= 0 ? '+' : ''}${g - f}` : `<span style="color:var(--warn)">no ${NAME[other(ref)]} counterpart</span>`);
+  });
+  c.addEventListener('mouseleave', () => $('#tip').style.display = 'none');
+  new ResizeObserver(scheduleRedraw).observe($('#cv'));
+}
+
+// ---------------------------------------------------------------- rows popover
+function renderRowPop() {
+  const pop = $('#rowpop'), names = allNames(); pop.innerHTML = '<div class="lbl" style="margin-bottom:6px">presets</div><div class="presets"></div>';
+  const pr = pop.querySelector('.presets');
+  for (const [n, list] of Object.entries({ default: DEFAULT_ROWS, ...PRESETS, all: [...names.keys()] })) { const b = document.createElement('button'); b.textContent = n; b.onclick = e => { e.stopPropagation(); selected = list.slice(); LS.set(KEY + ':rows', selected); renderRowPop(); redraw(); }; pr.appendChild(b); }
+  const lab = id => [...names.keys()].filter(n => { const r = rowOf(panes[id], n); return r && r.kind === 'label'; });
+  const ph = document.createElement('div'); ph.className = 'lbl grp'; ph.textContent = 'Δ compare (label rows)'; pop.appendChild(ph);
+  for (const [i, p] of pairs.entries()) { const d = document.createElement('div'); d.className = 'chk'; d.innerHTML = `<span class="tagT">T</span> ${p[0]} <span class="hint">vs</span> <span class="tagB">B</span> ${p[1]} <button style="margin-left:auto">×</button>`; d.querySelector('button').onclick = e => { e.stopPropagation(); pairs.splice(i, 1); LS.set(KEY + ':pairs', pairs); renderRowPop(); redraw(); }; pop.appendChild(d); }
+  const add = document.createElement('div'); add.className = 'chk';
+  add.innerHTML = `<select>${lab('t').map(n => `<option>${n}</option>`).join('')}</select><span class="hint">vs</span><select>${lab('b').map(n => `<option>${n}</option>`).join('')}</select><button>+ add</button>`;
+  const [sa, sb] = add.querySelectorAll('select'); add.querySelector('button').onclick = e => { e.stopPropagation(); pairs.push([sa.value, sb.value]); LS.set(KEY + ':pairs', pairs); renderRowPop(); redraw(); };
+  pop.appendChild(add);
+  let g = null;
+  for (const [n, grp] of names) {
+    if (grp !== g) { const h = document.createElement('div'); h.className = 'lbl grp'; h.textContent = grp; pop.appendChild(h); g = grp; }
+    const has = ['t', 'b'].filter(id => rowOf(panes[id], n)).map(id => `<span class="tag${id.toUpperCase()}">${id.toUpperCase()}</span>`).join('');
+    const l = document.createElement('label'); l.className = 'chk'; l.innerHTML = `<input type="checkbox" ${selected.includes(n) ? 'checked' : ''}> ${n} <span style="margin-left:auto">${has}</span>`;
+    l.querySelector('input').onchange = e => { selected = e.target.checked ? [...selected, n] : selected.filter(x => x !== n); LS.set(KEY + ':rows', selected); redraw(); };
+    pop.appendChild(l);
+  }
+  pop.onclick = e => e.stopPropagation();
+}
+
+// ---------------------------------------------------------------- layout
+const layout = LS.get('pv:dual:layout', {});
+const saveLayout = () => LS.set('pv:dual:layout', layout);
+function applyLayout() {
+  const r = layout.ratio ?? 0.5; document.body.style.setProperty('--a', r + 'fr'); document.body.style.setProperty('--b', (1 - r) + 'fr');
+  document.body.classList.toggle('stacked', !!layout.stacked);
+  const cmp = $('#cmp'); cmp.classList.toggle('sized', !!layout.cmpH); cmp.style.height = layout.cmpH ? layout.cmpH + 'px' : '';
+  if (layout.lblW) cmp.style.setProperty('--lblw', layout.lblW + 'px'); else cmp.style.removeProperty('--lblw');
+  RH = layout.rowH || 12; $('#rowH').value = RH;
+}
+function splitter(el, onMove, onReset) {
+  el.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return; e.preventDefault(); el.setPointerCapture(e.pointerId); el.classList.add('on'); document.body.classList.add('resizing');
+    const move = ev => { onMove(ev); applyLayout(); };
+    const up = () => { el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); el.classList.remove('on'); document.body.classList.remove('resizing'); saveLayout(); scheduleRedraw(); };
+    el.addEventListener('pointermove', move); el.addEventListener('pointerup', up);
+  });
+  el.addEventListener('dblclick', () => { onReset(); applyLayout(); saveLayout(); scheduleRedraw(); });
+}
+function setupLayout() {
+  applyLayout();
+  splitter($('#paneSplit'), e => { const r = $('#panes').getBoundingClientRect(); layout.ratio = clamp(layout.stacked ? (e.clientY - r.top) / r.height : (e.clientX - r.left) / r.width, 0.15, 0.85); }, () => delete layout.ratio);
+  splitter($('#cmpSplit'), e => { layout.cmpH = Math.round(clamp(window.innerHeight - e.clientY, 80, window.innerHeight - 160)); }, () => delete layout.cmpH);
+  splitter($('#lblSplit'), e => { layout.lblW = Math.round(clamp(e.clientX - $('#labels').getBoundingClientRect().left, 60, 420)); }, () => delete layout.lblW);
+  $('#bStack').onclick = () => { layout.stacked = !layout.stacked; applyLayout(); saveLayout(); scheduleRedraw(); };
+  $('#rowH').oninput = e => { layout.rowH = +e.target.value; applyLayout(); saveLayout(); scheduleRedraw(); };
+}
+
+// ---------------------------------------------------------------- boot
+async function boot() {
+  setupLayout();
+  if (!q.get('t') || !q.get('b')) { fail('open this page through <span class="mono">python match_viewer.py --dual --serve</span> (needs ?t=…&amp;b=… export folders)'); return; }
+  await Promise.all([openPane(panes.t), openPane(panes.b), loadSync()]);
+  fps = panes.t.ds.fps;
+  if (panes.b.ds.fps !== fps) fail(`the two exports have different fps (${fps} vs ${panes.b.ds.fps}); frame mapping assumes they match`);
+  wirePane(panes.t); wirePane(panes.b);
+  selected = LS.get(KEY + ':rows', null) || DEFAULT_ROWS.slice(); pairs = LS.get(KEY + ':pairs', null) || DEFAULT_PAIRS.map(p => p.slice());
+  ref = LS.get(KEY + ':axis', 't'); $('#axis').value = ref; view = fullRange();
+  ready = true;
+  setupTimeline(); renderAnchors(); setLinked(true); setLeader('t');
+  $('#bPlay').onclick = togglePlay;
+  $('#speed').onchange = e => { panes.t.v.playbackRate = panes.b.v.playbackRate = +e.target.value; };
+  $('#bLink').onclick = () => setLinked(!linked);
+  for (const d of [-25, -1, 1, 25]) $('#bN' + d).onclick = () => nudge(d);
+  $('#bAnchor').onclick = () => { const T = curAbs(panes.t), B = curAbs(panes.b); addAnchor(T, B, `manual @ ${fmtT(T)}`); setLinked(true); };
+  $('#bAnchors').onclick = e => { e.stopPropagation(); const p = $('#anchorpop'), r = e.target.getBoundingClientRect(); p.style.left = Math.max(8, r.right - 420) + 'px'; p.style.display = p.style.display === 'block' ? 'none' : 'block'; renderAnchors(); };
+  $('#anchorpop').onclick = e => e.stopPropagation();
+  $('#bRows').onclick = e => { e.stopPropagation(); const p = $('#rowpop'); p.style.display = p.style.display === 'block' ? 'none' : 'block'; renderRowPop(); };
+  document.addEventListener('click', () => { $('#rowpop').style.display = 'none'; $('#anchorpop').style.display = 'none'; });
+  $('#axis').onchange = e => { ref = e.target.value; LS.set(KEY + ':axis', ref); view = fullRange(); redraw(); };
+  document.addEventListener('keydown', e => {
+    if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
+    const L = panes[leader], step = e.shiftKey ? Math.round(fps) : 1;
+    if (e.key === ' ') { e.preventDefault(); togglePlay(); }
+    else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); L.v.pause(); L.pv.seek(L.pv.cur + (e.key === 'ArrowRight' ? step : -step)); }
+    else if (e.key === 'k' || e.key === 'K') setLinked(!linked);
+    else if (e.key === 'Escape') { view = fullRange(); redraw(); }
+  });
+  redraw(); requestAnimationFrame(tick);
+}
+window.__dual = { sync, panes, get view() { return view; }, get leader() { return leader; }, get linked() { return linked; }, redraw };
+boot();
+</script>
+</body>
+</html>

@@ -17,6 +17,11 @@ Interactive viewer (match_viewer.html + viewer/ next to this script):
     python match_viewer.py --source tactical  --mode full --serve --port 8765
     python match_viewer.py --source broadcast --mode full --serve --port 8766
 
+    # both on one page, synchronised (match_dual.html; sync from synchronize_videos.py -> export/sync.json)
+    python match_viewer.py --dual --mode full --export --serve     # export both, sync, open
+    python match_viewer.py --dual --mode full --serve              # reuse existing exports and sync file
+    python match_viewer.py --dual --serve --resync                 # recompute export/sync.json first
+
 AR flag overlays (optional): put export/referee_signals_tactical.json next to the repo
 (or pass --referee-signals PATH). Built by: python -m referee_signals --video ... --out ...
 
@@ -1165,21 +1170,29 @@ def pick_port(preferred, host="127.0.0.1", span=50):
     sys.exit(f"no free port in {preferred}..{preferred + span - 1}; pass a free --port")
 
 
-def serve(root, port, export_dir=None):
-    """Static file server with HTTP Range support (needed for video seeking); opens match_viewer.html.
+def check_export_dir(export_dir):
+    """Repo-relative form of an export folder; exits with a hint if it has not been exported yet."""
+    abs_dir = export_dir if os.path.isabs(export_dir) else os.path.join(HERE, export_dir)
+    if not os.path.isfile(os.path.join(abs_dir, "meta.json")):
+        sys.exit(f"no export at {export_dir}/ — run with --export first, e.g.\n"
+                 f"  python match_viewer.py --source … --mode … --export")
+    return os.path.relpath(abs_dir, HERE).replace(os.sep, "/")
+
+
+def serve(root, port, export_dir=None, page="match_viewer.html", query=None):
+    """Static file server with HTTP Range support (needed for video seeking); opens `page`.
     export_dir: optional repo-relative folder (e.g. export/broadcast_full) pinned via ?d= so several
-    instances on different ports can show different sources at once."""
+    instances on different ports can show different sources at once. query: extra URL parameters."""
     import http.server
     import socketserver
+    import urllib.parse
     import webbrowser
-    if not os.path.exists(os.path.join(HERE, "match_viewer.html")):
-        sys.exit("match_viewer.html must sit next to match_viewer.py")
+    for p in {"match_viewer.html", page}:
+        if not os.path.exists(os.path.join(HERE, p)):
+            sys.exit(f"{p} must sit next to match_viewer.py")
     if export_dir:
-        abs_dir = export_dir if os.path.isabs(export_dir) else os.path.join(HERE, export_dir)
-        if not os.path.isdir(abs_dir):
-            sys.exit(f"no export at {export_dir}/ — run with --export first, e.g.\n"
-                     f"  python match_viewer.py --source … --mode … --export")
-        export_dir = os.path.relpath(abs_dir, HERE).replace(os.sep, "/")
+        export_dir = check_export_dir(export_dir)
+    params = ({"d": export_dir} if export_dir else {}) | (query or {})
 
     class H(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *a, **k):
@@ -1253,15 +1266,49 @@ def serve(root, port, export_dir=None):
 
     port = pick_port(port)
     with Srv(("127.0.0.1", port), H) as httpd:
-        page = os.path.relpath(os.path.join(HERE, "match_viewer.html"), root).replace(os.sep, "/")
-        qs = f"?d={export_dir}" if export_dir else ""
-        url = f"http://127.0.0.1:{port}/{page}{qs}"
+        rel = os.path.relpath(os.path.join(HERE, page), root).replace(os.sep, "/")
+        qs = ("?" + urllib.parse.urlencode(params, safe="/")) if params else ""
+        url = f"http://127.0.0.1:{port}/{rel}{qs}"
         print(f"serving {root}" + (f"  [{export_dir}]" if export_dir else "") + f"\nopen   {url}   (Ctrl+C to stop)")
         webbrowser.open(url)
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
             pass
+
+
+def run_dual(args):
+    """--dual: optionally export both sources, make sure a sync file exists, serve match_dual.html."""
+    tac_dir, br_dir = export_relpath("tactical", args.mode), export_relpath("broadcast", "full")
+    if args.export:
+        common = (["--radius", str(args.radius)] if args.radius != 1.0 else []) + (["--no-referee"] if args.no_referee else [])
+        extra = {"tactical": ["--referee-signals", args.referee_signals] if args.referee_signals else [],
+                 "broadcast": ["--second-half-start", str(args.second_half_start)] if args.second_half_start is not None else []}
+        for src in ("tactical", "broadcast"):
+            print(f"\n=== exporting {src} ===")
+            r = subprocess.run([sys.executable, os.path.abspath(__file__), "--source", src, "--mode", args.mode,
+                                "--export", *common, *extra[src]])
+            if r.returncode != 0:
+                sys.exit(f"{src} export failed")
+    tac_dir, br_dir = check_export_dir(tac_dir), check_export_dir(br_dir)
+
+    sync_path = os.path.abspath(args.sync or os.path.join(HERE, "export", "sync.json"))
+    if args.resync or not os.path.isfile(sync_path):
+        print(f"\n=== synchronize_videos.py -> {sync_path} ===")
+        r = subprocess.run([sys.executable, os.path.join(HERE, "synchronize_videos.py"), "--out", sync_path])
+        if r.returncode != 0:
+            print("warning: synchronize_videos.py failed; the viewer starts unsynchronised "
+                  "(line both videos up by hand and press 'anchor here')")
+    query = {"t": tac_dir, "b": br_dir}
+    if os.path.isfile(sync_path):
+        query["sync"] = os.path.relpath(sync_path, HERE).replace(os.sep, "/")
+
+    videos = []
+    for d in (tac_dir, br_dir):
+        with open(os.path.join(HERE, d, "meta.json")) as fh:
+            videos.append(os.path.dirname(os.path.abspath(os.path.join(HERE, json.load(fh)["video"]))))
+    root = os.path.commonpath([HERE, *videos])
+    serve(root, args.port, page="match_dual.html", query=query)
 
 
 # ----------------------------------------------------------------------------
@@ -1277,6 +1324,11 @@ def main():
     ap.add_argument("--serve", action="store_true", help="start a local server and open match_viewer.html")
     ap.add_argument("--port", type=int, default=8765,
                     help="localhost port (default 8765); if busy, the next free port is used so several viewers can run in parallel")
+    ap.add_argument("--dual", action="store_true",
+                    help="tactical and broadcast side by side on one page, synchronised via export/sync.json "
+                         "(with --export: export both first; --mode picks the tactical window)")
+    ap.add_argument("--sync", help="--dual: sync file from synchronize_videos.py (default export/sync.json)")
+    ap.add_argument("--resync", action="store_true", help="--dual: rerun synchronize_videos.py even if the sync file exists")
     ap.add_argument("--dir", help="export folder to open (e.g. export/broadcast_full). "
                     "With --serve, also implied by --source/--mode when those flags are passed")
     ap.add_argument("--video")
@@ -1302,6 +1354,9 @@ def main():
         ap.add_argument(f"--no-{flag}", action="store_true")
     args = ap.parse_args()
     global HALVES, HALVES_EST
+    if args.dual:
+        run_dual(args)
+        return
     if args.serve and not args.export:
         # Pin a specific export when the user asked for one; plain --serve still reopens latest.json.
         if args.dir:

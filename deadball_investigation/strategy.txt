@@ -35,7 +35,11 @@ For now we fix (assume) the following:
 
 To use the broadcast, we need to synchronise it to the tactical video.
 How?
-
+First-kick off:
+Tactical - check after kick-off smart tag beginning; look for first instance of ball appearing.
+Broadcast - check the first place where the ball has a speed bigger than 10 m/s (i.e it is kicked) 
+Second kick-off:
+Tactical - the same
 
 
 

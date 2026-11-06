@@ -19,7 +19,15 @@
 }
 *{box-sizing:border-box}
 html,body{height:100%;margin:0;background:var(--bg)}
-body{display:grid;grid-template-rows:44px 1fr auto;grid-template-columns:1fr 310px;grid-template-areas:"hdr hdr" "stage side" "tl side";height:100vh;overflow:hidden}
+body{--sidew:310px;display:grid;grid-template-rows:44px minmax(0,1fr) auto;grid-template-columns:minmax(0,1fr) 5px var(--sidew);grid-template-areas:"hdr hdr hdr" "stage split side" "tl split side";height:100vh;overflow:hidden}
+body.resizing{user-select:none}
+body.noside{grid-template-columns:minmax(0,1fr) 0 0} body.noside #side,body.noside #sideSplit{display:none}
+body.notl #tl{display:none}
+#hdr button.off{color:var(--dim)}
+body.embed #hdr{gap:6px;padding:0 8px;white-space:nowrap;overflow:hidden} body.embed #hdr .title,body.embed #clkHalf,body.embed #bHelp{display:none}
+body.embed #srcName{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis} body.embed #clock{gap:8px} body.embed #clock .big{font-size:14px}
+body.embed #hdr button{padding:2px 7px}
+#sideSplit{grid-area:split;cursor:col-resize;background:var(--line)} #sideSplit:hover,#sideSplit.on{background:var(--muted)}
 .mono{font-family:"JetBrains Mono",ui-monospace,Consolas,monospace}
 .lbl{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}
 button,select,input[type=range]{font:inherit;color:var(--fg)}
@@ -33,10 +41,19 @@ kbd{font:500 10.5px "JetBrains Mono",monospace;background:#23272c;border:1px sol
 #loopInd{color:var(--air);font-size:12px}
 #stage{grid-area:stage;position:relative;display:flex;align-items:center;justify-content:center;background:#000;overflow:hidden}
 #wrap{position:relative}
+#vclip{position:absolute;inset:0;overflow:hidden}
+#vz{position:absolute;left:0;top:0;transform-origin:0 0}
+#vclip.panning,#vclip.panning #ov{cursor:grabbing}
 video{display:block}
 #ov{position:absolute;left:0;top:0}
 #mag{position:absolute;display:none;border:1px solid #fff;border-radius:50%;pointer-events:none;z-index:6;box-shadow:0 4px 18px rgba(0,0,0,.6)}
-#possCard{position:absolute;left:12px;top:12px;display:flex;gap:10px;pointer-events:none}
+#zoomCtl{position:absolute;right:10px;bottom:10px;z-index:5;display:flex;gap:4px;align-items:center;background:rgba(15,16,18,.78);border:1px solid var(--line);border-radius:6px;padding:3px 5px;font-size:12px}
+#zoomCtl button{padding:1px 7px} #zoomV{min-width:40px;text-align:center}
+#possCard{position:absolute;left:12px;top:12px;display:flex;flex-direction:column;gap:4px;z-index:4;pointer-events:none}
+#possGrip{pointer-events:auto;display:flex;align-items:center;gap:6px;align-self:flex-start;cursor:grab;background:rgba(15,16,18,.78);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:11px;color:var(--muted);user-select:none;opacity:.55}
+#possCard:hover #possGrip{opacity:1} #possCard.dragging #possGrip{cursor:grabbing;opacity:1}
+#possGrip button{padding:0 5px;font-size:11px;line-height:1.4}
+#possCards{display:flex;gap:10px;pointer-events:none} #possCard.vert #possCards{flex-direction:column;gap:6px}
 .card{background:rgba(15,16,18,.78);backdrop-filter:blur(6px);border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:150px}
 .card .big{font-size:40px;font-weight:600;line-height:1;margin:2px 0 4px} .card .name{font-weight:500} .card .sub{color:var(--muted);font-size:12px}
 #tip,#tip2{position:absolute;pointer-events:none;background:rgba(15,16,18,.94);border:1px solid var(--line2);border-radius:6px;padding:6px 9px;font-size:12px;display:none;z-index:9;white-space:nowrap}
@@ -59,14 +76,19 @@ textarea{width:100%;background:var(--panel2);border:1px solid var(--line2);borde
 #armed{font-size:12px;color:var(--warn);min-height:16px}
 .rule{background:#2a2410;border:1px solid #5a4a16;border-radius:6px;padding:6px 8px;font-size:11.5px;color:#e6d28a;margin-bottom:8px}
 .presets{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px}
-#tl{grid-area:tl;position:relative;border-top:1px solid var(--line);background:var(--panel);padding:8px 12px 10px;display:grid;grid-template-columns:112px 1fr;grid-template-rows:auto auto auto;gap:4px 8px}
-#tlctl{grid-column:1/3;display:flex;gap:8px;align-items:center;flex-wrap:wrap;position:relative} #tlctl .sp{flex:1}
-#rowlabels{position:relative} #rowlabels div{position:absolute;left:0;right:0;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;line-height:1}
+#tl{--lblw:112px;grid-area:tl;position:relative;border-top:1px solid var(--line);background:var(--panel);padding:8px 12px 10px;display:flex;flex-direction:column;gap:4px;max-height:45vh;min-height:0}
+#tl.sized{max-height:none}
+#tlSplit{position:absolute;left:0;right:0;top:-3px;height:7px;cursor:row-resize;z-index:3} #tlSplit:hover,#tlSplit.on{background:rgba(255,255,255,.18)}
+#tlctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;position:relative;flex:none} #tlctl .sp{flex:1}
+#tlbody{flex:1 1 auto;min-height:40px;overflow-y:auto;overflow-x:hidden;display:grid;grid-template-columns:var(--lblw) 6px minmax(0,1fr);align-items:start}
+#lblSplit{align-self:stretch;cursor:col-resize;border-right:1px solid var(--line);margin-right:2px} #lblSplit:hover,#lblSplit.on{border-right-color:var(--muted)}
+#rowlabels{position:relative;overflow:hidden} #rowlabels div{position:absolute;left:0;right:0;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1}
+#rowH{width:70px}
 #rowlabels div.grp{color:var(--dim);letter-spacing:.06em;text-transform:uppercase;font-size:10px} #rowlabels div.pin{color:#fff}
 #tlc{display:block;width:100%;cursor:crosshair}
-#legend{grid-column:1/3;display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);align-items:center} #legend span{display:inline-flex;align-items:center;gap:5px} #legend canvas{width:12px;height:12px}
+#legend{flex:none;display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);align-items:center} #legend span{display:inline-flex;align-items:center;gap:5px} #legend canvas{width:12px;height:12px}
 #rowpop,#ovpop{position:absolute;right:0;top:100%;margin-top:4px;max-height:60vh;overflow:auto;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:10px 12px;display:none;z-index:8;min-width:260px;box-shadow:0 8px 24px rgba(0,0,0,.5)} #rowpop .grp{margin:6px 0 2px}
-#help{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;z-index:20} #help .box{position:absolute;right:320px;top:60px;width:520px;max-height:85vh;overflow:auto;background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:14px 18px}
+#help{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;z-index:20} #help .box{position:absolute;right:calc(var(--sidew) + 10px);top:60px;width:520px;max-height:85vh;overflow:auto;background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:14px 18px}
 #help .box h2{margin:0 0 10px;font-size:14px}
 </style>
 </head>
@@ -78,11 +100,19 @@ textarea{width:100%;background:var(--panel2);border:1px solid var(--line2);borde
   <span class="sp"></span>
   <button id="bPlay" title="space">▶ play</button>
   <select id="speed" title="[ and ]"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select>
+  <button id="bTogTl" title="show / hide the timeline">timeline</button><button id="bTogSide" title="show / hide the side panel">panel</button>
   <button id="bHelp" title="?">? shortcuts</button>
 </header>
 
-<div id="stage"><div id="wrap"><video id="v" preload="auto" muted playsinline></video><canvas id="ov"></canvas><canvas id="mag"></canvas><div id="possCard"></div><div id="tip"></div></div></div>
+<div id="stage"><div id="wrap">
+  <div id="vclip"><div id="vz"><video id="v" preload="auto" muted playsinline></video><canvas id="ov"></canvas></div></div>
+  <canvas id="mag"></canvas>
+  <div id="possCard"><div id="possGrip" title="drag to move · double-click to reset position"><span>⠿ cards</span><button id="bCardDir" title="stack cards vertically / horizontally">⇅</button></div><div id="possCards"></div></div>
+  <div id="zoomCtl" title="wheel on the video = zoom at cursor · drag (or middle / right drag) = pan when zoomed · - / = keys"><button id="bZoomOut">−</button><span id="zoomV" class="mono">1.0×</span><button id="bZoomIn">+</button><button id="bZoomReset" title="reset zoom">⟲</button></div>
+  <div id="tip"></div>
+</div></div>
 <div id="tip2"></div>
+<div id="sideSplit" title="drag to resize the side panel · double-click to reset"></div>
 
 <aside id="side">
   <div class="sec" id="frameInfo"><h3>This frame</h3><div id="fi"></div></div>
@@ -143,10 +173,12 @@ textarea{width:100%;background:var(--panel2);border:1px solid var(--line2);borde
 </aside>
 
 <div id="tl">
+  <div id="tlSplit" title="drag to resize the timeline · double-click to reset"></div>
   <div id="tlctl">
     <span class="lbl">timeline</span>
-    <span class="hint">click = seek · drag = zoom · wheel = zoom at cursor · click the overview to jump</span>
+    <span class="hint">click = seek · drag = zoom · wheel = zoom at cursor · ⇧ wheel = scroll rows · click the overview to jump</span>
     <span class="sp"></span>
+    <span class="lbl">row h</span><input type="range" id="rowH" min="6" max="28" step="1" value="11" title="row height">
     <button id="bOverview">overview ▾</button><div id="ovpop"></div>
     <button id="bRows">rows ▾</button><div id="rowpop"></div>
     <span class="lbl">step events</span>
@@ -157,8 +189,7 @@ textarea{width:100%;background:var(--panel2);border:1px solid var(--line2);borde
     </select>
     <button id="bPrev">‹ prev</button><button id="bNext">next ›</button>
   </div>
-  <div id="rowlabels"></div>
-  <canvas id="tlc"></canvas>
+  <div id="tlbody"><div id="rowlabels"></div><div id="lblSplit" title="drag to resize the labels column"></div><canvas id="tlc"></canvas></div>
   <div id="legend"></div>
 </div>
 
@@ -214,6 +245,7 @@ class DataSet {
 // All frame indices are relative to the export.
 class EventIndex {
   constructor(ds) {
+    this.ds = ds;
     const m = ds.meta, n = ds.n;
     this.kick = new Set(m.events.kick);
     this.lostStarts = []; let inLost = false;
@@ -230,28 +262,32 @@ class EventIndex {
     this.flags = m.flags.map(f => ({ ...f, r: f.f - ds.start }));
     this.bjump = new Set(m.events.bjump.map(e => e[0]));
     this.pjump = new Set(m.events.pjump.map(e => e[0]));
-
-    // AR flag detections (export-relative). meta.referee.events from match_viewer export.
+    // AR flag detections keyed by export-relative frame.
     this.refereeByFrame = new Map();
     this.refereeFrames = [];
-    const ref = m.referee;
-    if (ref && ref.events) {
-      for (const e of ref.events) {
-        const r = e.f;
-        if (r < 0 || r >= n) continue;
-        if (!this.refereeByFrame.has(r)) this.refereeByFrame.set(r, []);
-        this.refereeByFrame.get(r).push(e);
-        this.refereeFrames.push(r);
-      }
-      this.refereeFrames = [...new Set(this.refereeFrames)].sort((a, b) => a - b);
+    this.refereeSignalFrames = []; // non-none only (for step / candidates)
+    if (m.referee && m.referee.events) this.ingestRefereeEvents(m.referee.events, { absolute: false });
+  }
+  /** Ingest viewer events. absolute=true means e.f / abs_f is a video frame index. */
+  ingestRefereeEvents(events, { absolute = false } = {}) {
+    if (!events || !events.length) return;
+    const n = this.ds.n, start = this.ds.start;
+    for (const e of events) {
+      let r = absolute ? +(e.abs_f ?? e.f) - start : +e.f;
+      if (!Number.isFinite(r) || r < 0 || r >= n) continue;
+      if (!this.refereeByFrame.has(r)) this.refereeByFrame.set(r, []);
+      this.refereeByFrame.get(r).push(e);
+      this.refereeFrames.push(r);
+      if (e.signal && e.signal !== 'none') this.refereeSignalFrames.push(r);
     }
-
+    this.refereeFrames = [...new Set(this.refereeFrames)].sort((a, b) => a - b);
+    this.refereeSignalFrames = [...new Set(this.refereeSignalFrames)].sort((a, b) => a - b);
   }
   list(name) {
     switch (name) {
       case 'restart': return this.restartFrames; case 'gt_change': return this.gtChanges; case 'kick': return [...this.kick].sort((a, b) => a - b);
       case 'lost': return this.lostStarts; case 'jump': return this.jumpFrames; case 'churn': return this.churnFrames;
-      case 'referee': return this.refereeFrames;
+      case 'referee': return this.refereeSignalFrames.length ? this.refereeSignalFrames : this.refereeFrames;
     }
     return [];
   }
@@ -596,8 +632,10 @@ let ds, E, P, store, queue, exportDir;
 let cur = 0, pinned = [], hover = null, layers = {}, view = [0, 0];
 let armed = null, pendingClicks = [], magnify = false, loop = null;
 let candFrames = [], candType = 'gt_vs_lh', includeHandled = false;
-let ROWS = [], rowCache = new Map(), tlDrag = null, slotsOpen = false;
-const RH = 11, RG = 2, GG = 9, OVH = 10, BANDH = 7, FLAG = 14;
+// clear() fires 'pv:changed' so an embedding page (match_dual.html) knows to redraw its strips
+let ROWS = [], rowCache = new (class extends Map { clear() { super.clear(); window.dispatchEvent(new Event('pv:changed')); } })(), tlDrag = null, slotsOpen = false;
+let RH = 11, OVH = 10, BANDH = 7;
+const RG = 2, GG = 9, FLAG = 14;
 // Things that can show up in the overview at the top of the timeline. GT always comes first.
 // A strip just reuses one of the rows, a band is a per bin summary from aggregateBands.
 const OVERVIEW_ITEMS = [
@@ -611,20 +649,70 @@ const OVERVIEW_DEFAULT = ['GT', 'restarts', 'ball lost', 'L&H share'];
 const LAYERS = [
   ['pitch', 'pitch lines', true], ['players', 'players', true], ['holder', 'L&H holder disc', true], ['ring', 'possession ring', true],
   ['ball', 'ball', true], ['trail', 'ball trail (1.5 s)', true], ['future', 'ball future (1 s)', true], ['opp', 'closest opponent line', true],
-  ['events', 'event marks (kick / jump / vanish)', true], ['referee', 'AR flags', true], ['ann', 'annotation marks', true], ['regions', 'dominant regions', false], ['hull', 'team hulls', false],
+  ['events', 'event marks (kick / jump / vanish)', true], ['referee', 'AR flag signals', true], ['ann', 'annotation marks', true], ['regions', 'dominant regions', false], ['hull', 'team hulls', false],
   ['arrows', 'attack direction', true], ['labels', 'slot numbers', true],
 ];
-const LAYER_PRESETS = { 'everything': null, 'players + ball': ['pitch', 'players', 'ball', 'labels'], 'referee_flags': ['pitch', 'referee'], 'clean video': [] };
+const LAYER_PRESETS = { 'everything': null, 'players + ball': ['pitch', 'players', 'ball', 'labels'], 'referee flags': ['pitch', 'referee'], 'clean video': [] };
 const ROW_PRESETS = {
   'all': null,
   'possession': ['GT', 'PRED', 'NAIVE', 'L&H', 'SEGMENT', 'MINE', 'RESTART', 'KICK'],
-  'events': ['GT', 'RESTART', 'KICK', 'AR_FLAGS', 'ANN EVENTS', 'BOOKMARK'],
+  'events': ['GT', 'RESTART', 'KICK', 'AR FLAGS', 'ANN EVENTS', 'BOOKMARK'],
   'data quality': ['GT', 'BALL LOST', 'BALL JUMP', 'PLAYER JUMP', 'DROPOUT <0.5 s', 'VANISH/APPEAR', 'COUNT ≠ 22', '› BOLT', 'HOMOGRAPHY', 'ANN DATA'],
   'annotation': ['GT', 'SEGMENT', 'MINE', 'ANN EVENTS', 'ANN DATA', 'SEGMENT B', 'ANN B', 'BOOKMARK'],
   'minimal': ['GT', 'L&H', 'RESTART', 'BALL LOST'],
 };
 
 // ---------------------------------------------------------------- boot
+async function tryFetchJson(url) {
+  try { const r = await fetch(url); if (!r.ok) return null; return await r.json(); } catch (e) { return null; }
+}
+/** Map raw referee_signals.json detections → viewer event records. */
+function refereeDocToEvents(doc) {
+  const styles = (ds && ds.meta.referee && ds.meta.referee.styles) || {
+    none: { glyph: 'cross', color: [80, 80, 80], hex: '#ffdc00' },
+    unknown: { glyph: 'cross', color: [120, 120, 120], hex: '#ffdc00' },
+    attention_raised: { glyph: 'tri_up', hex: '#ffdc00' },
+    throw_in_left: { glyph: 'diamond', hex: '#00a0ff' },
+    throw_in_right: { glyph: 'diamond', hex: '#ffa000' },
+    corner: { glyph: 'circle', hex: '#ff5050' },
+    goal_kick: { glyph: 'square', hex: '#50c850' },
+    substitution: { glyph: 'star', hex: '#dc64dc' },
+  };
+  const out = [];
+  for (const d of (doc.detections || [])) {
+    const sig = d.signal || 'none';
+    const st = styles[sig] || styles.unknown || { hex: '#ffdc00', glyph: 'cross', color: [0, 220, 255] };
+    out.push({
+      f: d.f, abs_f: d.f, official_id: d.official_id, signal: sig, confidence: d.confidence || 0,
+      bbox_xyxy: d.bbox_xyxy, flag_centroid: d.flag_centroid, flag_angle_deg: d.flag_angle_deg, rel: d.rel,
+      glyph: st.glyph || 'cross', color: st.color || [0, 220, 255], hex: st.hex || '#ffdc00',
+    });
+  }
+  return out;
+}
+async function loadRefereeSidecars() {
+  // Sidecar JSON is authoritative for boxes (includes signal=none). Falls back to meta.referee.
+  const src = (ds.meta.source || 'tactical');
+  const candidates = [
+    exportDir + '/referee_signals.json',
+    'export/referee_signals_' + src + '.json',
+    'export/referee_signals_tactical.json',
+    'export/referee_signals.json',
+    'referee_signals_' + src + '.json',
+  ];
+  for (const url of candidates) {
+    const doc = await tryFetchJson(url);
+    if (!doc || !doc.detections || !doc.detections.length) continue;
+    E.refereeByFrame = new Map();
+    E.refereeFrames = [];
+    E.refereeSignalFrames = [];
+    E.ingestRefereeEvents(refereeDocToEvents(doc), { absolute: true });
+    if (!ds.meta.referee) ds.meta.referee = { source: doc.source || src, styles: null, events: [] };
+    console.info('[referee] loaded', url, '→', E.refereeFrames.length, 'frames with boxes');
+    return;
+  }
+  if (!E.refereeFrames.length) console.warn('[referee] no meta.referee and no sidecar JSON found');
+}
 async function load() {
   exportDir = q.get('d');
   if (!exportDir) { try { exportDir = (await (await fetch('export/latest.json')).json()).dir; } catch (e) { exportDir = 'export/tactical_gt'; } }
@@ -633,8 +721,10 @@ async function load() {
   const buf = await (await fetch(exportDir + '/data.bin')).arrayBuffer();
   ds = new DataSet(meta, new Float32Array(buf));
   E = deriveEvents(ds);
+  await loadRefereeSidecars();
   store = new AnnotationStore({ get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } }, 'pv2:' + exportDir, ds);
-  $('#srcName').textContent = `${meta.source} · frames ${meta.start}-${meta.end} · ${(ds.n / ds.fps / 60).toFixed(1)} min`;
+  const nRef = E.refereeFrames.length;
+  $('#srcName').textContent = `${meta.source} · frames ${meta.start}-${meta.end} · ${(ds.n / ds.fps / 60).toFixed(1)} min` + (nRef ? ` · AR boxes on ${nRef} frames` : '');
   document.title = `Match viewer · ${meta.source}`;
   const v = $('#v'); v.src = meta.video;
   v.addEventListener('loadedmetadata', init, { once: true });
@@ -669,6 +759,7 @@ function init() {
   ov.addEventListener('click', onPitchClick);
   document.addEventListener('keydown', onKey);
   seek(0);
+  window.__pv.ready = true; window.dispatchEvent(new Event('pv:ready'));
 }
 function renderAll() { buildRows(); buildCandidates(); renderBookmarks(); renderAnn(); renderAgreement(); drawTimeline(); draw(); updateInfo(); }
 
@@ -677,7 +768,119 @@ function fit() {
   const ar = v.videoWidth / v.videoHeight, sw = st.clientWidth - 8, sh = st.clientHeight - 8;
   let w = sw, h = w / ar; if (h > sh) { h = sh; w = h * ar; } w = Math.floor(w); h = Math.floor(h);
   wrap.style.width = v.style.width = ov.style.width = w + 'px'; wrap.style.height = v.style.height = ov.style.height = h + 'px';
+  applyZoom(); placeCards();
   draw();
+}
+
+// ---------------------------------------------------------------- layout: video zoom, draggable cards, splitters
+// Persisted per origin (each --port instance keeps its own layout).
+const EMBED = !!q.get('embed');
+const LAYOUT_KEY = EMBED ? 'pv:layout:embed:' + (q.get('d') || '') : 'pv:layout';
+const layout = (() => { try { return JSON.parse(localStorage.getItem(LAYOUT_KEY)) || {}; } catch (e) { return {}; } })();
+const saveLayout = () => { try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); } catch (e) {} };
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+let vzS = 1, vzX = 0, vzY = 0, pan = null, suppressClick = false;
+
+function applyZoom() {
+  const wrap = $('#wrap'), W = wrap.clientWidth, H = wrap.clientHeight;
+  vzS = clamp(vzS, 1, 10); vzX = clamp(vzX, W - W * vzS, 0); vzY = clamp(vzY, H - H * vzS, 0);
+  $('#vz').style.transform = vzS === 1 ? '' : `translate(${vzX}px,${vzY}px) scale(${vzS})`;
+  $('#zoomV').textContent = vzS.toFixed(1) + '×';
+}
+// px, py: point in #wrap coordinates that stays fixed while zooming
+function zoomAt(px, py, k) {
+  const s = clamp(vzS * k, 1, 10); if (s === vzS) return;
+  vzX = px - (px - vzX) * s / vzS; vzY = py - (py - vzY) * s / vzS; vzS = s; applyZoom();
+}
+function zoomCenter(k) { const wrap = $('#wrap'); zoomAt(wrap.clientWidth / 2, wrap.clientHeight / 2, k); }
+function resetZoom() { vzS = 1; vzX = vzY = 0; applyZoom(); }
+const toolNeedsClick = () => armed || (store && store.pending && store.pending.x !== undefined);
+
+function setupVideoZoom() {
+  const clip = $('#vclip');
+  clip.addEventListener('wheel', e => {
+    e.preventDefault(); const r = $('#wrap').getBoundingClientRect();
+    zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-clamp(e.deltaY, -200, 200) * 0.002));
+  }, { passive: false });
+  clip.addEventListener('mousedown', e => { if (e.button === 1) e.preventDefault(); });   // no autoscroll on middle click
+  clip.addEventListener('contextmenu', e => { if (vzS > 1 || pan) e.preventDefault(); });
+  clip.addEventListener('pointerdown', e => {
+    const left = e.button === 0 && vzS > 1 && !toolNeedsClick();
+    if (!(left || e.button === 1 || e.button === 2) || vzS === 1) return;
+    pan = { x0: e.clientX, y0: e.clientY, vx: vzX, vy: vzY, moved: false, btn: e.button };
+  });
+  window.addEventListener('pointermove', e => {
+    if (!pan) return;
+    const dx = e.clientX - pan.x0, dy = e.clientY - pan.y0;
+    if (!pan.moved && Math.hypot(dx, dy) < 4) return;
+    pan.moved = true; clip.classList.add('panning');
+    vzX = pan.vx + dx; vzY = pan.vy + dy; applyZoom();
+  });
+  window.addEventListener('pointerup', () => {
+    if (!pan) return;
+    if (pan.moved && pan.btn === 0) { suppressClick = true; setTimeout(() => suppressClick = false, 0); }
+    pan = null; clip.classList.remove('panning');
+  });
+  $('#bZoomIn').onclick = () => zoomCenter(1.25); $('#bZoomOut').onclick = () => zoomCenter(0.8); $('#bZoomReset').onclick = resetZoom;
+}
+
+// card position is stored as a fraction of the video box so it survives resizes
+function placeCards() {
+  const el = $('#possCard'), wrap = $('#wrap'), c = layout.card || {};
+  el.classList.toggle('vert', !!c.vert);
+  if (c.fx === undefined) { el.style.left = '12px'; el.style.top = '12px'; return; }
+  const W = wrap.clientWidth, H = wrap.clientHeight;
+  el.style.left = clamp(c.fx * W, 0, Math.max(0, W - el.offsetWidth)) + 'px';
+  el.style.top = clamp(c.fy * H, 0, Math.max(0, H - el.offsetHeight)) + 'px';
+}
+function setupCardDrag() {
+  const el = $('#possCard'), grip = $('#possGrip');
+  grip.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || e.target.closest('button')) return;
+    e.preventDefault(); grip.setPointerCapture(e.pointerId); el.classList.add('dragging');
+    const wr = $('#wrap').getBoundingClientRect(), ox = e.clientX - el.offsetLeft, oy = e.clientY - el.offsetTop;
+    const move = ev => {
+      const x = clamp(ev.clientX - ox, 0, Math.max(0, wr.width - el.offsetWidth)), y = clamp(ev.clientY - oy, 0, Math.max(0, wr.height - el.offsetHeight));
+      el.style.left = x + 'px'; el.style.top = y + 'px';
+      layout.card = { ...(layout.card || {}), fx: x / wr.width, fy: y / wr.height };
+    };
+    const up = () => { grip.removeEventListener('pointermove', move); grip.removeEventListener('pointerup', up); el.classList.remove('dragging'); saveLayout(); };
+    grip.addEventListener('pointermove', move); grip.addEventListener('pointerup', up);
+  });
+  grip.addEventListener('dblclick', e => { if (e.target.closest('button')) return; const v = layout.card && layout.card.vert; layout.card = v ? { vert: v } : {}; saveLayout(); placeCards(); });
+  $('#bCardDir').onclick = () => { layout.card = { ...(layout.card || {}), vert: !(layout.card && layout.card.vert) }; saveLayout(); placeCards(); };
+}
+
+// generic drag-to-resize on a splitter element
+function splitter(el, onMove, onReset) {
+  el.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return; e.preventDefault(); el.setPointerCapture(e.pointerId);
+    el.classList.add('on'); document.body.classList.add('resizing');
+    const move = ev => onMove(ev);
+    const up = () => { el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); el.classList.remove('on'); document.body.classList.remove('resizing'); saveLayout(); };
+    el.addEventListener('pointermove', move); el.addEventListener('pointerup', up);
+  });
+  el.addEventListener('dblclick', () => { onReset(); saveLayout(); });
+}
+function setSideW(w) { if (w) document.body.style.setProperty('--sidew', w + 'px'); else document.body.style.removeProperty('--sidew'); }
+function setTlH(h) { const tl = $('#tl'); tl.classList.toggle('sized', !!h); tl.style.height = h ? h + 'px' : ''; }
+function setLblW(w) { if (w) $('#tl').style.setProperty('--lblw', w + 'px'); else $('#tl').style.removeProperty('--lblw'); }
+function setRowH(h) { RH = h; OVH = Math.max(10, h - 1); BANDH = Math.max(7, Math.round(h * 0.75)); $('#rowH').value = h; if (ROWS.length) drawTimeline(); }
+function setPanels() {
+  const side = layout.side ?? !EMBED, tl = layout.tl ?? !EMBED;
+  document.body.classList.toggle('noside', !side); document.body.classList.toggle('notl', !tl);
+  $('#bTogSide').classList.toggle('off', !side); $('#bTogTl').classList.toggle('off', !tl);
+}
+function setupLayout() {
+  document.body.classList.toggle('embed', EMBED);
+  setSideW(layout.sideW); setTlH(layout.tlH); setLblW(layout.lblW); setRowH(layout.rowH || 11); setPanels();
+  $('#bTogSide').onclick = () => { layout.side = document.body.classList.contains('noside'); saveLayout(); setPanels(); };
+  $('#bTogTl').onclick = () => { layout.tl = document.body.classList.contains('notl'); saveLayout(); setPanels(); };
+  splitter($('#sideSplit'), e => { layout.sideW = Math.round(clamp(window.innerWidth - e.clientX - 2, 200, window.innerWidth * 0.7)); setSideW(layout.sideW); }, () => { delete layout.sideW; setSideW(); });
+  splitter($('#tlSplit'), e => { layout.tlH = Math.round(clamp(window.innerHeight - e.clientY, 80, window.innerHeight - 160)); setTlH(layout.tlH); }, () => { delete layout.tlH; setTlH(); });
+  splitter($('#lblSplit'), e => { layout.lblW = Math.round(clamp(e.clientX - $('#rowlabels').getBoundingClientRect().left, 40, 420)); setLblW(layout.lblW); }, () => { delete layout.lblW; setLblW(); });
+  $('#rowH').oninput = e => { layout.rowH = +e.target.value; setRowH(layout.rowH); saveLayout(); };
+  setupVideoZoom(); setupCardDrag();
 }
 
 // ---------------------------------------------------------------- navigation
@@ -725,8 +928,9 @@ function onKey(e) {
   else if (K === '1') setSeg({ state: 'controlled' }); else if (K === '2') setSeg({ state: 'flight' }); else if (K === '3') setSeg({ state: 'loose' });
   else if (K === 'z' || K === 'Z') { magnify = !magnify; $('#mag').style.display = magnify ? 'block' : 'none'; }
   else if (K === 'l' || K === 'L') toggleLoop();
+  else if (K === '=' || K === '+') zoomCenter(1.25); else if (K === '-') zoomCenter(0.8);
   else if (K === '?') toggleHelp();
-  else if (K === 'Escape') { if ($('#help').style.display === 'block') toggleHelp(); else { view = [0, ds.n - 1]; pinned = []; loop = null; $('#loopInd').textContent = ''; renderPinned(); drawTimeline(); draw(); } }
+  else if (K === 'Escape') { if ($('#help').style.display === 'block') toggleHelp(); else { view = [0, ds.n - 1]; pinned = []; loop = null; resetZoom(); $('#loopInd').textContent = ''; renderPinned(); drawTimeline(); draw(); } }
   else if (K === 'Home') seek(0); else if (K === 'End') seek(ds.n - 1);
   else if (TOOL[K.toUpperCase()] && TOOL[K.toUpperCase()].cat !== 'state') arm(K.toUpperCase());
 }
@@ -885,8 +1089,8 @@ function buildLegend() {
 function setupHelp() {
   const rows = [['space', 'play / pause'], ['← →', 'one frame'], ['⇧ + ← →', 'one second'], [', .', 'previous / next event (type in the timeline bar)'], ['[ ]', 'slower / faster'], ['Home End', 'start / end'],
     ['Enter', 'candidate done, go to next'], ['Backspace', 'candidate skipped'], ['!', 'candidate flagged'], ['H A', 'segment: team from here'], ['1 2 3', 'segment state: controlled / flight / loose'], ['D or 4', 'segment: dead ball'], ['X or 0', 'segment: clear from here'],
-    ['P S T I C J F O K', 'event at this frame'], ['N M G W V Y U R Q', 'data error: opens an interval; same key or Enter closes; Esc discards'], ['arrows while placing', 'nudge 10 cm (⇧ 50 cm)'], ['Z', 'magnifier'], ['L', 'loop the last 2 s'], ['B', 'bookmark with the note'],
-    ['Ctrl+Z', 'undo'], ['Esc', 'cancel tool / reset zoom and pins / close help'], ['?', 'this help'], ['click player', 'pin (⇧-click two: distance)'], ['timeline', 'click = seek · drag = zoom · wheel = zoom at cursor'], ['slot row label', 'pin that slot']];
+    ['P S T I C J F O K', 'event at this frame'], ['N M G W V Y U R Q', 'data error: opens an interval; same key or Enter closes; Esc discards'], ['arrows while placing', 'nudge 10 cm (⇧ 50 cm)'], ['Z', 'magnifier'], ['wheel on video · - / =', 'zoom video at cursor (drag, middle or right drag pans)'], ['L', 'loop the last 2 s'], ['B', 'bookmark with the note'],
+    ['Ctrl+Z', 'undo'], ['Esc', 'cancel tool / reset zooms and pins / close help'], ['?', 'this help'], ['click player', 'pin (⇧-click two: distance)'], ['timeline', 'click = seek · drag = zoom · wheel = zoom at cursor'], ['slot row label', 'pin that slot']];
   $('#helpBody').innerHTML = rows.map(([k, d]) => `<div class="row"><span class="k"><kbd>${k}</kbd></span><span class="v">${d}</span></div>`).join('');
   $('#bHelp').onclick = toggleHelp; $('#help').onclick = e => { if (e.target.id === 'help') toggleHelp(); };
 }
@@ -907,13 +1111,11 @@ function draw() {
   const ov = $('#ov'), ctx = ov.getContext('2d'); ctx.clearRect(0, 0, ov.width, ov.height);
   const r = cur, Hm = ds.H(r), b = ds.ball(r), PL = ds.players(r), tp = +$('#rad').value, holder = P.lhPid[r];
   hitList = []; ctx.lineWidth = 1.2; ctx.font = '500 13px Inter';
-  if (!Hm) { 
-    ctx.fillStyle = 'rgba(240,60,60,.9)'; 
-    ctx.font = '500 14px Inter'; 
-    ctx.fillText('no homography on this frame', 16, ov.height - 16); 
+  if (!Hm) {
+    ctx.fillStyle = 'rgba(240,60,60,.9)'; ctx.font = '500 14px Inter';
+    ctx.fillText('no homography on this frame', 16, ov.height - 16);
     if (layers.referee) drawReferee(ctx, r);
-    drawPossCard(r, b, tp, 0, 0); 
-    return; 
+    drawPossCard(r, b, tp, 0, 0); return;
   }
   if (layers.pitch) { ctx.strokeStyle = 'rgba(255,255,255,.55)'; for (const L of PITCH_LINES) { poly(ctx, L.map(p => ds.proj(Hm, p[0], p[1]))); ctx.stroke(); } }
   if (layers.regions && PL.length) { const gw = 30, gh = 20; ctx.globalAlpha = .18; for (let i = 0; i < gw; i++) for (let j = 0; j < gh; j++) { const cx = (i + .5) / gw, cy = (j + .5) / gh; let bh = 1e9, ba = 1e9; for (const p of PL) { const d = ds.metres({ x: cx, y: cy }, p); if (ds.sideOf(p.k) === 'H') bh = Math.min(bh, d); else if (ds.sideOf(p.k) === 'A') ba = Math.min(ba, d); } if (bh === ba) continue; ctx.fillStyle = bh < ba ? TEAM.H : TEAM.A; poly(ctx, [[i / gw, j / gh], [(i + 1) / gw, j / gh], [(i + 1) / gw, (j + 1) / gh], [i / gw, (j + 1) / gh]].map(p => ds.proj(Hm, p[0], p[1])), true); ctx.fill(); } ctx.globalAlpha = 1; }
@@ -946,35 +1148,60 @@ function draw() {
   if (b && holder >= 0 && layers.opp) { const os = ds.sideOf(holder) === 'H' ? 'A' : 'H', nn = nearest[os]; if (nn) { const o = ds.proj(Hm, nn.p.x, nn.p.y), bp = ds.proj(Hm, b.x, b.y); ctx.strokeStyle = TEAM[os]; ctx.globalAlpha = .7; poly(ctx, [o, bp]); ctx.stroke(); ctx.globalAlpha = 1; ctx.fillStyle = TEAM[os]; ctx.font = '500 11px Inter'; ctx.fillText(nn.d.toFixed(1) + ' m', (o[0] + bp[0]) / 2 + 4, (o[1] + bp[1]) / 2 - 6); } }
   if (pinned.length === 2) { const a = ds.slot(r, pinned[0]), c = ds.slot(r, pinned[1]); if (a && c) { const pa = ds.proj(Hm, a.x, a.y), pc = ds.proj(Hm, c.x, c.y); ctx.setLineDash([4, 4]); ctx.strokeStyle = '#fff'; poly(ctx, [pa, pc]); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle = '#fff'; ctx.font = '500 12px Inter'; ctx.fillText(ds.metres(a, c).toFixed(1) + ' m', (pa[0] + pc[0]) / 2 + 4, (pa[1] + pc[1]) / 2 - 6); } }
   if (b && layers.ball) { poly(ctx, groundCircle(Hm, b.x, b.y, ds.meta.ball_radius, 16), true); ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke(); ctx.lineWidth = 1.2; const pb = ds.ball(r - 1); if (pb && b.sf > 1) { const c = ds.proj(Hm, b.x, b.y), e = ds.proj(Hm, b.x + (b.x - pb.x) * 10, b.y + (b.y - pb.y) * 10); ctx.strokeStyle = '#fff'; poly(ctx, [c, e]); ctx.stroke(); } }
+  if (layers.referee) drawReferee(ctx, r);
   if (layers.ann) { drawAnn(ctx, Hm, r, 'A'); drawAnn(ctx, Hm, r, 'B'); drawPending(ctx, Hm); }
   drawPossCard(r, b, tp, inH, inA);
 }
-
-function drawReferee(ctx, r){
+function drawReferee(ctx, r) {
   if (!E || !E.refereeByFrame) return;
   const dets = E.refereeByFrame.get(r) || [];
+  // HUD so a missing box is diagnosable (wrong frame vs missing data)
+  ctx.save();
+  ctx.font = '600 13px Inter';
+  ctx.fillStyle = 'rgba(0,0,0,.55)';
+  ctx.fillRect(8, 8, 280, dets.length ? 28 : 46);
+  ctx.fillStyle = '#ffdc00';
+  if (!E.refereeFrames.length) {
+    ctx.fillText('AR: no referee JSON loaded', 16, 28);
+  } else if (!dets.length) {
+    const nearest = E.refereeFrames.reduce((best, f) => best === null || Math.abs(f - r) < Math.abs(best - r) ? f : best, null);
+    ctx.fillText(`AR: no box on this frame (${ds.start + r})`, 16, 28);
+    if (nearest !== null) ctx.fillText(`nearest @ ${ds.start + nearest}  (step: AR flags)`, 16, 46);
+  } else {
+    ctx.fillText(`AR: ${dets.length} box(es) on frame ${ds.start + r}`, 16, 28);
+  }
+  ctx.restore();
+
   for (const d of dets) {
-    const c = d.hex || rgb(d.color) || '#ffdc00';
+    const c = (d.hex && d.hex !== '#505050' && d.hex !== '#787878') ? d.hex : '#ffdc00';
     const bbox = d.bbox_xyxy;
     if (bbox) {
-      const [x0, y0, x1, y1] = bbox;
-      ctx.strokeStyle = c; ctx.lineWidth = 100; ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
-      ctx.fillStyle = c; ctx.font = '600 12px Inter';
-      ctx.fillText(`${d.official_id || 'AR'} ${d.signal}`, x0, Math.max(12, y0 - 6));
+      const [x0, y0, x1, y1] = bbox.map(Number);
+      const w = x1 - x0, h = y1 - y0;
+      // dark halo then bright box — visible on grass and stands
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 5; ctx.strokeRect(x0, y0, w, h);
+      ctx.strokeStyle = c; ctx.lineWidth = 3; ctx.strokeRect(x0, y0, w, h);
+      ctx.font = '700 14px Inter';
+      const lab = `${d.official_id || 'AR'} · ${d.signal || '?'}`;
+      ctx.lineWidth = 3; ctx.strokeStyle = '#000'; ctx.strokeText(lab, x0 + 2, Math.max(18, y0 - 8));
+      ctx.fillStyle = c; ctx.fillText(lab, x0 + 2, Math.max(18, y0 - 8));
       const mx = (x0 + x1) / 2, my = y0 + 0.4 * (y1 - y0);
       if (d.flag_centroid) {
-        const [fx, fy] = d.flag_centroid;
+        const [fx, fy] = d.flag_centroid.map(Number);
+        ctx.strokeStyle = '#000'; ctx.lineWidth = 4;
         ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(fx, fy); ctx.stroke();
-        ctx.beginPath(); ctx.arc(fx, fy, 4, 0, 7); ctx.fill();
+        ctx.strokeStyle = c; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(fx, fy); ctx.stroke();
+        ctx.beginPath(); ctx.arc(fx, fy, 6, 0, 7); ctx.fillStyle = c; ctx.fill();
+        ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.stroke();
       }
     } else if (d.flag_centroid) {
-      const [fx, fy] = d.flag_centroid;
-      ctx.fillStyle = c; ctx.beginPath(); ctx.arc(fx, fy, 5, 0, 7); ctx.fill();
+      const [fx, fy] = d.flag_centroid.map(Number);
+      ctx.fillStyle = c; ctx.beginPath(); ctx.arc(fx, fy, 6, 0, 7); ctx.fill();
       glyph(ctx, d.glyph || 'tri_up', fx, fy - 14, 5, c);
     }
   }
 }
-
 function convexHull(pts) { pts = [...pts].sort((a, b) => a[0] - b[0] || a[1] - b[1]); const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]); const lo = [], up = []; for (const p of pts) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); } for (const p of pts.reverse()) { while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); } return lo.slice(0, -1).concat(up.slice(0, -1)); }
 function annAnchor(a, Hm, r) { if (a.x !== undefined) return ds.proj(Hm, a.x, a.y); if (a.slots) { const s = ds.slot(r, a.slots[0]); if (s) return ds.proj(Hm, s.x, s.y); } if (a.bx !== undefined) return ds.proj(Hm, a.bx, a.by); return null; }
 function drawAnn(ctx, Hm, r, layer) {
@@ -997,7 +1224,7 @@ function drawPending(ctx, Hm) {
   else if (pendingClicks.length && pendingClicks[0].x !== undefined) { const q = ds.proj(Hm, pendingClicks[0].x, pendingClicks[0].y); ctx.strokeStyle = '#fff'; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(q[0], q[1], 9, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
 }
 function drawPossCard(r, b, tp, inH, inA) {
-  const g = ds.gt(r), el = $('#possCard'); let html = '';
+  const g = ds.gt(r), el = $('#possCards'); let html = '';
   const name = { H: 'Barcelona · home', A: 'Athletic · away', D: 'dead ball', X: 'no label' };
   if (g !== null) { let s = r; while (s > 0 && ds.gt(s - 1) === g) s--; html += `<div class="card" style="border-top:3px solid ${TEAM[g]}"><div class="lbl">ground truth</div><div class="big" style="color:${TEAM[g]}">${g}</div><div class="name">${name[g]}</div><div class="sub">held ${((r - s) / ds.fps).toFixed(1)} s</div></div>`; }
   else html += `<div class="card"><div class="lbl">ground truth</div><div class="sub">none on the broadcast timeline</div></div>`;
@@ -1024,6 +1251,7 @@ function drawMagnifier(e) {
   g.strokeStyle = '#fff'; g.beginPath(); g.moveTo(size / 2 - 8, size / 2); g.lineTo(size / 2 + 8, size / 2); g.moveTo(size / 2, size / 2 - 8); g.lineTo(size / 2, size / 2 + 8); g.stroke();
 }
 function onPitchClick(e) {
+  if (suppressClick) return;
   if (armed || (store.pending && store.pending.x !== undefined)) { toolClick(e); return; }
   const h = nearestHit(e); if (!h) return;
   if (e.shiftKey) { if (!pinned.includes(h.k)) pinned = [...pinned.slice(-1), h.k]; } else pinned = pinned.includes(h.k) ? [] : [h.k];
@@ -1063,7 +1291,6 @@ function buildRows() {
   pr.push(lab('NAIVE', r => P.naive[r]), lab('L&H', r => P.lh[r]), { name: 'SEGMENT', kind: 'segment', layer: 'A' }, lab('MINE', r => store.derivedLabel(r)));
   if (store.layerB.segments.length) pr.push({ name: 'SEGMENT B', kind: 'segment', layer: 'B' });
   grp('possession', pr);
-
   const ev = [{ name: 'RESTART', kind: 'restart' }, mask('KICK', r => E.kick.has(r), col('kick'))];
   if (E.refereeFrames && E.refereeFrames.length) {
     const refColor = (ds.meta.referee && ds.meta.referee.styles && ds.meta.referee.styles.attention_raised)
@@ -1082,7 +1309,6 @@ function buildRows() {
     });
   }
   ev.push({ name: 'ANN EVENTS', kind: 'ann', cat: 'event', layer: 'A' });
-
   if (store.layerB.points.length) ev.push({ name: 'ANN B', kind: 'ann', cat: null, layer: 'B' });
   ev.push(mask('BOOKMARK', r => store.bookmarks.some(b => b.f === r), '#ffffff'));
   grp('events', ev);
@@ -1127,13 +1353,13 @@ function setupTimeline() {
   window.addEventListener('mouseup', () => { if (!tlDrag) return; const [a, b] = [tlDrag.x0, tlDrag.x1].sort((x, y) => x - y), W = c.clientWidth; if (b - a < 4) { $('#v').pause(); seek(xToFrame(a, W)); } else { view = [xToFrame(a, W), xToFrame(b, W)]; if (view[1] - view[0] < 10) view[1] = view[0] + 10; buildRows(); } tlDrag = null; drawTimeline(); });
   c.addEventListener('mousemove', e => { const W = c.clientWidth, r = xToFrame(e.offsetX, W), tip = $('#tip2'); tip.style.display = 'block'; tip.style.left = (e.clientX + 12) + 'px'; tip.style.top = (e.clientY - 70) + 'px'; const b = ds.ball(r), seg = store.segmentAt(r); tip.innerHTML = `<b class="mono">${ds.start + r}</b> · ${(r / ds.fps).toFixed(1)} s<br>GT <b style="color:${TEAM[ds.gt(r) || 'X']}">${ds.gt(r) || '-'}</b> · naive <b style="color:${TEAM[P.naive[r]]}">${P.naive[r] || '-'}</b> · L&amp;H <b style="color:${TEAM[P.lh[r]]}">${P.lh[r] || '-'}</b>${ds.meta.pred ? ` · pred <b style="color:${TEAM[ds.pred(r)]}">${ds.pred(r)}</b>` : ''}${seg.state !== 'clear' ? `<br>mine ${seg.team || '-'} · ${seg.state}` : ''}<br>ball ${b ? b.sf.toFixed(1) + ' m/s' : 'lost'} · tracked ${ds.meta.count[r]}`; });
   c.addEventListener('mouseleave', () => $('#tip2').style.display = 'none');
-  c.addEventListener('wheel', e => { e.preventDefault(); const W = c.clientWidth, r = xToFrame(e.offsetX, W), span = view[1] - view[0], k = e.deltaY > 0 ? 1.25 : .8, ns = Math.max(10, Math.min(ds.n - 1, span * k)); let a = r - (r - view[0]) * ns / span; a = Math.max(0, Math.min(ds.n - 1 - ns, a)); view = [Math.round(a), Math.round(a + ns)]; buildRows(); drawTimeline(); }, { passive: false });
+  c.addEventListener('wheel', e => { e.preventDefault(); if (e.shiftKey) { $('#tlbody').scrollTop += e.deltaY || e.deltaX; return; } const W = c.clientWidth, r = xToFrame(e.offsetX, W), span = view[1] - view[0], k = e.deltaY > 0 ? 1.25 : .8, ns = Math.max(10, Math.min(ds.n - 1, span * k)); let a = r - (r - view[0]) * ns / span; a = Math.max(0, Math.min(ds.n - 1 - ns, a)); view = [Math.round(a), Math.round(a + ns)]; buildRows(); drawTimeline(); }, { passive: false });
   new ResizeObserver(drawTimeline).observe($('#tl'));
 }
 const xToFrame = (x, W) => Math.max(0, Math.min(ds.n - 1, Math.round(view[0] + x / W * (view[1] - view[0]))));
 const frameToX = (r, W) => (r - view[0]) / Math.max(1, view[1] - view[0]) * W;
 function drawTimeline() {
-  if (!ROWS.length) return; ensureBands();
+  if (!ROWS.length || document.body.classList.contains('notl')) return; ensureBands();
   const c = $('#tlc'), W = Math.max(50, c.clientWidth), dpr = window.devicePixelRatio || 1;
   const items = overviewOn().map(n => OVERVIEW_ITEMS.find(i => i.name === n));
   const ovH = items.reduce((s, it) => s + (it.kind === 'strip' ? OVH : BANDH) + 1, 0);
@@ -1142,18 +1368,18 @@ function drawTimeline() {
   c.width = W * dpr; c.height = h * dpr; c.style.height = h + 'px'; const g = c.getContext('2d'); g.scale(dpr, dpr);
   g.fillStyle = '#17191c'; g.fillRect(0, 0, W, h);
   // overview: strips and bands over the whole export, in the order the user picked
-  const labels = $('#rowlabels'); labels.innerHTML = '';
-  const mkLab = (t, yy, cls, onclick) => { const d = document.createElement('div'); d.textContent = t; d.style.top = yy + 'px'; if (cls) d.className = cls; if (onclick) { d.onclick = onclick; d.style.cursor = 'pointer'; } labels.appendChild(d); };
+  const labels = $('#rowlabels'); labels.innerHTML = ''; labels.style.height = h + 'px';
+  const mkLab = (t, yy, cls, onclick, fs) => { const d = document.createElement('div'); d.textContent = t; d.title = t; d.style.top = yy + 'px'; if (fs) d.style.fontSize = fs + 'px'; if (cls) d.className = cls; if (onclick) { d.onclick = onclick; d.style.cursor = 'pointer'; } labels.appendChild(d); };
   const nb = bands.length, bw = W / nb; let y = 0;
   for (const it of items) {
-    if (it.kind === 'strip') { const row = ROWS.find(r => r.name === it.row); const saved = view; view = [0, ds.n - 1]; g.drawImage(rowStrip(row, 0, ds.n - 1, W), 0, 0, W, 1, 0, y, W, OVH); view = saved; mkLab(it.name, y + 1, 'grp'); y += OVH + 1; continue; }
+    if (it.kind === 'strip') { const row = ROWS.find(r => r.name === it.row); const saved = view; view = [0, ds.n - 1]; g.drawImage(rowStrip(row, 0, ds.n - 1, W), 0, 0, W, 1, 0, y, W, OVH); view = saved; mkLab(it.name, y + 1, 'grp', null, Math.min(10, OVH)); y += OVH + 1; continue; }
     for (const [i, bnd] of bands.entries()) {
       if (it.key === 'share') { const d = bnd.shareH - bnd.shareA; if (!d) continue; g.fillStyle = d > 0 ? TEAM.H : TEAM.A; g.globalAlpha = Math.min(1, Math.abs(d) * 1.3); }
       else if (it.count) { if (!bnd[it.key]) continue; g.fillStyle = col(it.color); g.globalAlpha = Math.min(1, 0.5 + bnd[it.key] * 0.25); }
       else { if (!bnd[it.key]) continue; g.fillStyle = col(it.color); g.globalAlpha = Math.min(1, bnd[it.key] * 1.5); }
       g.fillRect(i * bw, y, Math.max(1, Math.ceil(bw)), BANDH); g.globalAlpha = 1;
     }
-    mkLab(it.name, y, 'grp'); y += BANDH + 1;
+    mkLab(it.name, y, 'grp', null, Math.min(10, BANDH + 1)); y += BANDH + 1;
   }
   const bandsH = ovH;
   g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(view[0] / (ds.n - 1) * W, 0, Math.max(2, (view[1] - view[0]) / (ds.n - 1) * W), bandsH); g.strokeStyle = '#fff'; g.strokeRect(view[0] / (ds.n - 1) * W + .5, .5, Math.max(2, (view[1] - view[0]) / (ds.n - 1) * W), bandsH - 1);
@@ -1165,7 +1391,7 @@ function drawTimeline() {
     if (row.grp) { if (groupVisible(i)) { mkLab(row.grp, y + 1, 'grp', row.toggle ? () => { slotsOpen = !slotsOpen; buildRows(); drawTimeline(); } : null); y += GG; } continue; }
     if (!rowVisible(row.name)) continue;
     g.drawImage(rowStrip(row, view[0], view[1], W), 0, 0, W, 1, 0, y, W, RH);
-    mkLab(row.name, y + 1, row.kind === 'slot' && pinned.includes(row.k) ? 'pin' : null, row.kind === 'slot' ? () => { pinned = pinned.includes(row.k) ? [] : [row.k]; renderPinned(); rowCache.clear(); draw(); drawTimeline(); } : null);
+    mkLab(row.name, y + Math.max(0, (RH - 10) / 2), row.kind === 'slot' && pinned.includes(row.k) ? 'pin' : null, row.kind === 'slot' ? () => { pinned = pinned.includes(row.k) ? [] : [row.k]; renderPinned(); rowCache.clear(); draw(); drawTimeline(); } : null);
     y += RH + RG;
   }
   for (const f of E.flags) { if (f.r < view[0] || f.r > view[1]) continue; const x = frameToX(f.r, W), cc = rgb(f.color); g.strokeStyle = cc; g.globalAlpha = .5; g.beginPath(); g.moveTo(x + .5, yFlag); g.lineTo(x + .5, h); g.stroke(); g.globalAlpha = 1; glyph(g, f.glyph, x, yFlag + 6, 4.5, cc); }
@@ -1235,7 +1461,8 @@ function renderRowPop() {
   }
 }
 // a small hook so the e2e test can look inside
-window.__pv = { overviewOn, get ds() { return ds; }, get store() { return store; }, get P() { return P; }, get queue() { return queue; }, get cur() { return cur; }, get view() { return view; }, get pinned() { return pinned; }, get hitList() { return hitList; }, seek, setCandType(t) { candType = t; $('#candType').value = t; buildCandidates(); } };
+window.__pv = { ready: false, overviewOn, rowStrip, rowVisible, get ROWS() { return ROWS; }, get E() { return E; }, video: $('#v'), get ds() { return ds; }, get store() { return store; }, get P() { return P; }, get queue() { return queue; }, get cur() { return cur; }, get view() { return view; }, get pinned() { return pinned; }, get hitList() { return hitList; }, seek, setCandType(t) { candType = t; $('#candType').value = t; buildCandidates(); } };
+setupLayout();
 load();
 
 </script>
