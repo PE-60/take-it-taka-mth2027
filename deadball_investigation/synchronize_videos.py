@@ -10,12 +10,16 @@ second-half kick-offs — on each timeline, so a later tool can map frames betwe
 export/sync.json is what `match_viewer.py --dual` reads. Each anchor is a pair of video frames
 showing the same moment; from an anchor up to the next one, broadcast = tactical + offset.
 
-Second-half kick-off
---------------------
+Second half: ball-speed cross-correlation
+-----------------------------------------
 Tactical: the first kick-off tag whose Half mentions 2 (or, failing that, the first one more than
-50 minutes after the first kick-off), then the first ball appearance from there, as above.
-Broadcast: the longest stretch after the first kick-off where fewer than 5 players are tracked
-(halftime, at least 2 minutes), then the first frame after it with ball speed > 10 m/s.
+50 minutes after the first kick-off). From that tag's start, take the first whole stretch where the
+ball is never missing (at least SIGNATURE_MIN_S long; shorter blips are skipped) and use its
+frame-derived ball speed as a signature.
+Broadcast: frame-derived ball speed in the window from 45 minutes after the first-half kick-off
+alignment to 45 minutes before the end of the video. The signature is slid over that window with
+a normalised cross-correlation that ignores frames where either side has no ball; the best lag
+gives the broadcast frame of the signature start, and so the second-half offset.
 
 Tactical kick-off frame
 -----------------------
@@ -44,6 +48,7 @@ import xml.etree.ElementTree as ET
 
 import cv2
 
+import numpy as np
 sys.path.append("..")
 
 from games import DATA_DIR, GAME, GAMES, require
@@ -54,8 +59,13 @@ MISSING = "N"  # first character of "NaN" in the raw ATD
 BALL_SPEED_THRESHOLD_MS = 10.0
 KICKOFF_TYPE_NEEDLE = "kick off"  # matches "Kick Off (Start)" and "Kick Off (After Goal)"
 SECOND_HALF_MIN_GAP_MIN = 50      # fallback: 2nd-half kick-off is at least this long after the 1st
-HALFTIME_MIN_GAP_S = 120          # broadcast halftime: at least this long with < HALFTIME_MAX_PLAYERS tracked
-HALFTIME_MAX_PLAYERS = 5
+SIGNATURE_MIN_S = 4.0             # shortest ball-present stretch accepted as the tactical signature
+SEARCH_MARGIN_MIN = 45            # broadcast window: this long after the 1st kick-off .. this long before the end
+SMOOTH_FRAMES = 5                 # NaN-aware moving average on both speed curves (1 = off)
+MAX_PLAUSIBLE_SPEED_MS = 40.0     # faster "speeds" are tracking teleports; treated as missing so one spike cannot dominate
+MIN_OVERLAP = 0.25                # a lag counts only if this share of the signature overlaps broadcast ball data
+MIN_OVERLAP_S = 3.0               # ... and at least this much overlap in absolute terms (broadcast ball is ~50% visible)
+PEAK_EXCLUSION_S = 2.0            # runner-up peak must be at least this far from the best one
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_OUT = os.path.join(HERE, "export", "sync.json")
 
@@ -202,15 +212,23 @@ def first_ball_speed_above(atd_raw_path: str, threshold_ms: float, fps: float, p
         "no broadcast ATD frame with frame-derived ball speed > {} m/s".format(threshold_ms))
 
 
-def tracked_players(players_field: str) -> int:
-    """Number of players with a finite (x, y) in an ATD players group ("x,y,...;x,y,...;...")."""
-    return sum(1 for p in players_field.split(";") if parse_ball_xy(p)[0] is not None)
+def video_frame_count(path: str) -> int:
+    """Container frame count from OpenCV, or raise if it is not available."""
+    cap = cv2.VideoCapture(path)
+    if not cap.isOpened():
+        raise IOError("could not open video: {}".format(path))
+    try:
+        n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    finally:
+        cap.release()
+    if n <= 0:
+        raise ValueError("no usable frame count in video metadata: {}".format(path))
+    return n
 
 
-def halftime_gap(atd_raw_path: str, from_frame: int, fps: float):
-    """(first, last) video frame of the longest stretch >= from_frame with few tracked players,
-    or None if no stretch is at least HALFTIME_MIN_GAP_S long."""
-    best, run_start, prev = None, None, None
+def load_ball_track(atd_raw_path: str):
+    """Ball (x, y) per 0-based video frame as two float arrays, NaN where the ball is missing."""
+    frames, xs, ys = [], [], []
     with open(atd_raw_path) as handle:
         for line in handle:
             parts = line.split(FIELD_SEP)
@@ -220,21 +238,146 @@ def halftime_gap(atd_raw_path: str, from_frame: int, fps: float):
                 video_frame = int(parts[0]) - 1
             except ValueError:
                 continue
-            if video_frame < from_frame:
-                continue
-            empty = tracked_players(parts[1]) < HALFTIME_MAX_PLAYERS
-            if empty and run_start is None:
-                run_start = video_frame
-            elif not empty and run_start is not None:
-                if best is None or prev - run_start > best[1] - best[0]:
-                    best = (run_start, prev)
-                run_start = None
-            prev = video_frame
-    if run_start is not None and (best is None or prev - run_start > best[1] - best[0]):
-        best = (run_start, prev)
-    if best is None or (best[1] - best[0] + 1) < HALFTIME_MIN_GAP_S * fps:
+            x, y = parse_ball_xy(parts[2])
+            if x is not None:
+                frames.append(video_frame)
+                xs.append(x)
+                ys.append(y)
+    if not frames:
+        raise RuntimeError("no ball positions in {}".format(atd_raw_path))
+    n = max(frames) + 1
+    bx = np.full(n, np.nan)
+    by = np.full(n, np.nan)
+    bx[frames] = xs
+    by[frames] = ys
+    return bx, by
+
+
+def ball_speed_curve(bx, by, pitch, fps: float):
+    """Frame-derived ball speed (m/s) per frame, same formula as frame_ball_speed_ms.
+    NaN on the first frame, wherever this frame or the previous one has no ball, and above
+    MAX_PLAUSIBLE_SPEED_MS."""
+    length_m, width_m = pitch
+    sp = np.full(len(bx), np.nan)
+    sp[1:] = np.hypot(np.diff(bx) * length_m, np.diff(by) * width_m) * fps
+    sp[sp > MAX_PLAUSIBLE_SPEED_MS] = np.nan
+    return sp
+
+
+def nan_smooth(v, k: int):
+    """Centred moving average of width k that skips NaNs; stays NaN where v is NaN."""
+    if k <= 1:
+        return v.copy()
+    ok = np.isfinite(v)
+    ker = np.ones(k)
+    num = np.convolve(np.where(ok, v, 0.0), ker, "same")
+    den = np.convolve(ok.astype(float), ker, "same")
+    out = np.full(len(v), np.nan)
+    out[ok] = num[ok] / den[ok]
+    return out
+
+
+def ball_present_runs(bx, from_frame: int):
+    """(first, last) frames of consecutive ball-present stretches starting at or after from_frame."""
+    present = np.isfinite(bx[from_frame:])
+    edges = np.diff(np.concatenate([[0], present.astype(np.int8), [0]]))
+    starts, ends = np.flatnonzero(edges == 1), np.flatnonzero(edges == -1) - 1
+    return [(int(a) + from_frame, int(b) + from_frame) for a, b in zip(starts, ends)]
+
+
+def _xcorr_valid(a, t):
+    """sum_i t[i] * a[k + i] for every k with the template fully inside a (FFT)."""
+    n = len(a) + len(t) - 1
+    size = 1 << (n - 1).bit_length()
+    full = np.fft.irfft(np.fft.rfft(a, size) * np.fft.rfft(t[::-1], size), size)[:n]
+    return full[len(t) - 1:len(a)]
+
+
+def masked_ncc(signal, template, min_overlap: float = MIN_OVERLAP, min_samples: int = 0):
+    """Normalised cross-correlation of template against signal at every 'valid' lag, using only
+    samples where both are finite. Returns (scores, overlap counts); lags where fewer than
+    min_overlap of the template's finite samples (or fewer than min_samples) overlap are -inf."""
+    ms, mt = np.isfinite(signal).astype(float), np.isfinite(template).astype(float)
+    s, t = np.where(ms > 0, signal, 0.0), np.where(mt > 0, template, 0.0)
+    n = _xcorr_valid(ms, mt)
+    sum_s, sum_ss = _xcorr_valid(s, mt), _xcorr_valid(s * s, mt)
+    sum_t, sum_tt = _xcorr_valid(ms, t), _xcorr_valid(ms, t * t)
+    sum_st = _xcorr_valid(s, t)
+    n_safe = np.maximum(np.rint(n), 1.0)
+    cov = sum_st - sum_s * sum_t / n_safe
+    var = (sum_ss - sum_s ** 2 / n_safe) * (sum_tt - sum_t ** 2 / n_safe)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        score = cov / np.sqrt(var)
+    bad = (np.rint(n) < max(min_overlap * mt.sum(), min_samples)) | ~(var > 1e-9) | ~np.isfinite(score)
+    score[bad] = -np.inf
+    return score, n
+
+
+def second_half_by_xcorr(tactical_atd, broadcast_atd, broadcast_video, tag2, b1, pitch, fps, log=print,
+                         signature_s: float = 0.0):
+    """Second-half anchor from the tactical ball-speed signature matched into the broadcast.
+    signature_s > 0 extends the signature to that many seconds from the start of the first
+    ball stretch (gaps included; they are ignored by the masked correlation).
+    Returns the anchor dict, or None (with a warning logged) when it cannot be found."""
+    tx, ty = load_ball_track(tactical_atd)
+    runs = ball_present_runs(tx, tag2["start_frame"])
+    min_len = int(round(SIGNATURE_MIN_S * fps))
+    run = next((r for r in runs if r[1] - r[0] + 1 >= min_len), None)
+    if run is None:
+        log("warning: no ball-present stretch of {:.0f} s after the 2nd-half kick-off tag".format(SIGNATURE_MIN_S))
         return None
-    return best
+    skipped = sum(1 for r in runs if r[0] < run[0])
+    t_speed = nan_smooth(ball_speed_curve(tx, ty, pitch, fps), SMOOTH_FRAMES)
+    sig_start = run[0] + 1                             # speed needs the previous frame, so skip the first
+    sig_end = max(run[1], run[0] + int(round(signature_s * fps))) if signature_s > 0 else run[1]
+    template = t_speed[sig_start:sig_end + 1]
+    log("")
+    log("tactical signature: frames {}..{} ({:.1f} s{}{})".format(
+        run[0], sig_end, (sig_end - run[0] + 1) / fps,
+        " of ball" if sig_end == run[1] else ", {:.0f}% with ball".format(100 * np.isfinite(template).mean()),
+        ", skipped {} shorter stretch(es) before it".format(skipped) if skipped else ""))
+
+    bx, by = load_ball_track(broadcast_atd)
+    n_b = video_frame_count(broadcast_video)
+    margin = int(round(SEARCH_MARGIN_MIN * 60 * fps))
+    lo, hi = b1 + margin, n_b - 1 - margin
+    if hi < lo:
+        log("warning: broadcast search window is empty ({} .. {}); video too short for a {} min margin".format(
+            lo, hi, SEARCH_MARGIN_MIN))
+        return None
+    b_speed = nan_smooth(ball_speed_curve(bx, by, pitch, fps), SMOOTH_FRAMES)
+    stop = min(len(b_speed), hi + len(template))
+    window = b_speed[lo:stop]
+    if len(window) < len(template):
+        log("warning: broadcast ball data ends before the search window")
+        return None
+    log("broadcast search window: signature start in {} .. {}".format(
+        frame_timestamp(lo, fps), frame_timestamp(min(hi, lo + len(window) - len(template)), fps)))
+
+    ncc, overlap = masked_ncc(window, template, min_samples=int(round(MIN_OVERLAP_S * fps)))
+    if not np.isfinite(ncc).any():
+        log("warning: no lag in the broadcast window has enough overlapping ball data")
+        return None
+    # A few seconds of overlap correlate highly by chance, so lags are ranked by the Fisher z
+    # significance atanh(r) * sqrt(n - 3), which weighs the correlation against the overlap size.
+    n = np.maximum(np.rint(overlap), 0)
+    score = np.where(np.isfinite(ncc), np.arctanh(np.clip(ncc, -0.999, 0.999)) * np.sqrt(np.maximum(n - 3, 0)), -np.inf)
+    k = int(np.argmax(score))
+    best = float(score[k])
+    excl = int(round(PEAK_EXCLUSION_S * fps))
+    rest = score.copy()
+    rest[max(0, k - excl):k + excl + 1] = -np.inf
+    runner = float(rest.max()) if np.isfinite(rest).any() else float("nan")
+    b_sig = lo + k
+    offset = b_sig - sig_start
+    log("cross-correlation: best at broadcast {}: correlation {:.3f} over {:.0f}% of the signature "
+        "(score {:.3f}), runner-up score {:.3f}".format(
+            frame_timestamp(b_sig, fps), float(ncc[k]), 100 * n[k] / np.isfinite(template).sum(), best, runner))
+    if float(ncc[k]) < 0.4 or (math.isfinite(runner) and runner > 0.8 * best):
+        log("warning: weak or ambiguous match; check it in the dual viewer (anchors ▾ → go)")
+    return {"label": "2nd half (ball-speed xcorr)", "tactical": run[0], "broadcast": run[0] + offset,
+            "method": "ball-speed cross-correlation", "correlation": round(float(ncc[k]), 4), "score": round(best, 4),
+            "runner_up": round(runner, 4) if math.isfinite(runner) else None}
 
 
 def second_half_kickoff_tag(kickoffs, first_tag, fps: float):
@@ -250,7 +393,7 @@ def second_half_kickoff_tag(kickoffs, first_tag, fps: float):
 
 
 def compute_sync(tactical_video, tactical_atd, smart_tagging, broadcast_video, broadcast_atd, pitch,
-                 log=print):
+                 log=print, signature_s: float = 0.0):
     """Kick-off anchors on both timelines -> the dict written to sync.json."""
     fps = assert_same_fps(tactical_video, broadcast_video)
     log("video fps: {:.6g} (tactical and broadcast metadata agree)".format(fps))
@@ -272,20 +415,22 @@ def compute_sync(tactical_video, tactical_atd, smart_tagging, broadcast_video, b
     log("offset (broadcast - tactical): {:+d} frames".format(b1 - t1))
 
     tag2 = second_half_kickoff_tag(kickoffs, first_tag, fps)
-    gap = halftime_gap(broadcast_atd, b1, fps)
     if tag2 is None:
         log("warning: no second-half kick-off tag found, only the first-half anchor is written")
-    elif gap is None:
-        log("warning: no halftime gap found in the broadcast ATD, only the first-half anchor is written")
     else:
-        t2 = first_ball_appearance(tactical_atd, tag2["start_frame"])
-        b2 = first_ball_speed_above(broadcast_atd, BALL_SPEED_THRESHOLD_MS, fps, pitch, from_frame=gap[1] + 1)
-        anchors.append({"label": "2nd-half kick-off", "tactical": t2, "broadcast": b2})
         log("")
-        log("broadcast halftime gap: frames {}..{} ({:.1f} min)".format(gap[0], gap[1], (gap[1] - gap[0] + 1) / fps / 60))
-        log("tactical 2nd-half kick-off:  {}".format(frame_timestamp(t2, fps)))
-        log("broadcast 2nd-half kick-off: {}".format(frame_timestamp(b2, fps)))
-        log("offset (broadcast - tactical): {:+d} frames ({:+d} vs 1st half)".format(b2 - t2, (b2 - t2) - (b1 - t1)))
+        log("second-half kick-off smart tag: Type={!r} Half={!r} frames {}..{}".format(
+            tag2["type"], tag2["half"], tag2["start_frame"], tag2["end_frame"]))
+        a2 = second_half_by_xcorr(tactical_atd, broadcast_atd, broadcast_video, tag2, b1, pitch, fps, log=log,
+                                  signature_s=signature_s)
+        if a2 is None:
+            log("only the first-half anchor is written")
+        else:
+            anchors.append(a2)
+            t2, b2 = a2["tactical"], a2["broadcast"]
+            log("tactical 2nd-half anchor:  {}".format(frame_timestamp(t2, fps)))
+            log("broadcast 2nd-half anchor: {}".format(frame_timestamp(b2, fps)))
+            log("offset (broadcast - tactical): {:+d} frames ({:+d} vs 1st half)".format(b2 - t2, (b2 - t2) - (b1 - t1)))
     return {
         "fps": fps,
         "tactical_video": os.path.basename(tactical_video),
@@ -308,6 +453,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", default=DEFAULT_OUT, help="where to write the anchors (default export/sync.json)")
     ap.add_argument("--no-write", action="store_true", help="only print, do not write a JSON file")
+    ap.add_argument("--signature-s", type=float, default=0.0,
+                    help="2nd half: use this many seconds of tactical ball speed from the first ball stretch "
+                         "as the signature (gaps allowed) instead of just that stretch; try 60 if the match is ambiguous")
     args = ap.parse_args()
 
     fps_game = GAMES[GAME]["fps"]
@@ -320,7 +468,8 @@ def main() -> int:
     print("data dir: {}".format(DATA_DIR))
     print("game:     {}".format(GAME))
 
-    sync = compute_sync(tactical_video, tactical_atd, smart_tagging, broadcast_video, broadcast_atd, pitch)
+    sync = compute_sync(tactical_video, tactical_atd, smart_tagging, broadcast_video, broadcast_atd, pitch,
+                        signature_s=args.signature_s)
     if abs(sync["fps"] - fps_game) > 1e-3:
         print("warning: container fps ({:.6g}) differs from games.py fps ({})".format(
             sync["fps"], fps_game))

@@ -39,8 +39,27 @@ First-kick off:
 Tactical - check after kick-off smart tag beginning; look for first instance of ball appearing.
 Broadcast - check the first place where the ball has a speed bigger than 10 m/s (i.e it is kicked) 
 Second kick-off:
-Tactical - the same
-
+From tactical, get ball speed signature (graph) for first whole interval where ball is not missing, after start timestamp of the second kickoff smart tag. On broadcast video - take interval which is 45 mins after first kickoff alignment and 45 mins before the end of the video; then run cross-correlation alignment on the ball signature (ball speed graph) between the broadcast interval and the tactical interval
 
 
     27:44
+
+Dead ball interval:
+
+
+missing = M
+tactical = Tac
+broadcast = Bro
+homography = H
+ball = B
+player count not 22 = CN22
+union = ∪
+intersec = ∩
+
+
+(BroMH ∩ BroCN22) U (TacMB ∩ BroMB) <- Formula for Dead ball intervals
+
+
+
+Fine-tuning of the intervals - for the end of the interval look where the ball has a big acceleration, i.e. it's kicked
+
