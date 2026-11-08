@@ -2,12 +2,15 @@
 """
 match_viewer.py: see what the data sees, on the tactical or the broadcast video.
 
+Lives in match_viewer/ (with match_viewer.html, match_dual.html, synchronize_videos.py and export/);
+run it from anywhere, e.g. `python match_viewer/match_viewer.py ...` from the repo root.
+
 Rendered video (same command shape for both sources; --mode gt exists for tactical only):
     python match_viewer.py --mode gt                          # tactical, public 5-minute window
     python match_viewer.py --mode full                        # tactical, whole match
     python match_viewer.py --source broadcast --mode full     # broadcast, whole match
 
-Interactive viewer (match_viewer.html + viewer/ next to this script):
+Interactive viewer (match_viewer.html next to this script; exports go to match_viewer/export/):
     python match_viewer.py --mode gt --export --serve
     python match_viewer.py --mode full --export --serve
     python match_viewer.py --source broadcast --mode full --export --serve
@@ -22,10 +25,10 @@ Interactive viewer (match_viewer.html + viewer/ next to this script):
     python match_viewer.py --dual --mode full --serve              # reuse existing exports and sync file
     python match_viewer.py --dual --serve --resync                 # recompute export/sync.json first
 
-AR flag overlays (optional): put export/referee_signals_tactical.json next to the repo
-(or pass --referee-signals PATH). Built by: python -m referee_signals --video ... --out ...
+AR flag overlays (optional): put referee_signals_tactical.json in match_viewer/export/
+(or pass --referee-signals PATH). Built by: python -m referee_signals --video ... (from the repo root)
 
-Data layout (the repository's): data/tactical/ and data/broadcast/ next to this script.
+Data layout (the repository's): data/tactical/ and data/broadcast/ at the repo root, one level up.
 `--inspect` prints how the ATD is parsed.  See MATCH_VIEWER.md.
 """
 import argparse
@@ -64,9 +67,11 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# where to look for the data: this folder, the folder above it (the zip unpacks into a subfolder,
-# so the data may sit one level up), and MTAH_DATA_DIR if set
-SEARCH_ROOTS = [HERE, os.path.dirname(HERE)] + ([os.environ["MTAH_DATA_DIR"]] if os.environ.get("MTAH_DATA_DIR") else [])
+REPO = os.path.dirname(HERE)
+if REPO not in sys.path:
+    sys.path.insert(0, REPO)                  # referee_signals/ lives at the repo root
+# where to look for the data: this folder, the repo root above it, and MTAH_DATA_DIR if set
+SEARCH_ROOTS = [HERE, REPO] + ([os.environ["MTAH_DATA_DIR"]] if os.environ.get("MTAH_DATA_DIR") else [])
 PITCH_M = (105.3, 68.0)                      # metres, from games.py
 HALVES = {1: (11185, 90651), 2: (110808, 190197)}   # tactical graded blocks (replaced for broadcast)
 HALVES_EST = False

@@ -20,18 +20,17 @@ python -m referee_signals.tests.test_pipeline
 # calibrate HSV on a real frame (needs video + display)
 python -m referee_signals.calibrate_colors \
   --video data/tactical/BAR-ATH_tactical.mp4 --frame 5000 \
-  --out export/seeds_tactical.json
+  --out match_viewer/export/seeds_tactical.json
 
-# run detection on a window
+# run detection on a window (default --out: match_viewer/export/referee_signals_tactical.json)
 python -m referee_signals \
   --video data/tactical/BAR-ATH_tactical.mp4 \
-  --seeds export/seeds_tactical.json \
-  --start 0 --end 2500 \
-  --out export/referee_signals_tactical.json
+  --seeds match_viewer/export/seeds_tactical.json \
+  --start 0 --end 2500
 
-# export / serve viewer (picks up export/referee_signals_tactical.json automatically)
-python match_viewer.py --export --serve
-# or: python match_viewer.py --referee-signals export/referee_signals_tactical.json --export
+# export / serve viewer (picks up match_viewer/export/referee_signals_tactical.json automatically)
+python match_viewer/match_viewer.py --export --serve
+# or: python match_viewer/match_viewer.py --referee-signals path/to/referee_signals.json --export
 ```
 
 ## JSON schema

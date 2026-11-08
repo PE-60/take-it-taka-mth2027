@@ -3,12 +3,12 @@
 The two videos are not aligned. This script picks shared real-world moments — the first-half and
 second-half kick-offs — on each timeline, so a later tool can map frames between them.
 
-    python synchronize_videos.py                       # prints and writes export/sync.json
-    python synchronize_videos.py --out other.json
-    python synchronize_videos.py --no-write
-    python synchronize_videos.py --first-half-xcorr       # 1st half by cross-correlation too (see below)
+    python match_viewer/synchronize_videos.py                    # prints and writes match_viewer/export/sync.json
+    python match_viewer/synchronize_videos.py --out other.json
+    python match_viewer/synchronize_videos.py --no-write
+    python match_viewer/synchronize_videos.py --first-half-xcorr # 1st half by cross-correlation too (see below)
 
-export/sync.json is what `match_viewer.py --dual` reads. Each anchor is a pair of video frames
+match_viewer/export/sync.json is what `match_viewer.py --dual` reads. Each anchor is a pair of video frames
 showing the same moment; from an anchor up to the next one, broadcast = tactical + offset.
 
 Second half: ball-speed cross-correlation
@@ -57,9 +57,10 @@ import xml.etree.ElementTree as ET
 import cv2
 import numpy as np
 
-sys.path.append("..")
-
-from games import DATA_DIR, GAME, GAMES, require
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO not in sys.path:
+    sys.path.insert(0, REPO)  # games.py lives at the repo root
+from games import DATA_DIR, GAME, GAMES, require  # noqa: E402
 
 # Params
 FIELD_SEP = ":"

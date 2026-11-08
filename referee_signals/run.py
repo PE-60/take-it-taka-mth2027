@@ -14,6 +14,8 @@ from .io import save_signals
 from .schema import empty_document
 from .seeds import default_seeds_path, load_seeds
 
+VIEWER_EXPORT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "match_viewer", "export")
+
 
 def process_video(
     video: str,
@@ -76,7 +78,8 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description="Detect AR flags on a match video (Stein-style color/contour).")
     ap.add_argument("--video", required=True, help="path to MP4 (tactical preferred)")
     ap.add_argument("--seeds", default=None, help="JSON color seeds (default: package tactical defaults)")
-    ap.add_argument("--out", default="export/referee_signals_tactical.json")
+    ap.add_argument("--out", default=None,
+                    help="output JSON (default: match_viewer/export/referee_signals_<source>.json)")
     ap.add_argument("--source", default="tactical", choices=["tactical", "broadcast"])
     ap.add_argument("--start", type=int, default=0)
     ap.add_argument("--end", type=int, default=None)
@@ -84,7 +87,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--progress-every", type=int, default=100)
     args = ap.parse_args(argv)
 
-    out = args.out
+    out = args.out or os.path.join(VIEWER_EXPORT, f"referee_signals_{args.source}.json")
     os.makedirs(os.path.dirname(os.path.abspath(out)) or ".", exist_ok=True)
     process_video(
         video=args.video,
