@@ -1316,6 +1316,7 @@ def run_dual(args):
     dead_ball_run = os.path.join(REPO, "dead_ball_investigation", "run.py")
     dead_ball_json = os.path.join(HERE, "export", "dead_ball.json")
     inputs = [sync_path] + [os.path.join(HERE, d, f) for d in (tac_dir, br_dir) for f in ("meta.json", "data.bin")]
+    inputs += glob.glob(os.path.join(os.path.dirname(dead_ball_run), "*.py"))
     dead_ball_age = os.path.getmtime(dead_ball_json) if os.path.isfile(dead_ball_json) else None
     dead_ball_stale = dead_ball_age is None or any(os.path.isfile(p) and os.path.getmtime(p) > dead_ball_age for p in inputs)
     if not os.path.isfile(dead_ball_run):
@@ -1324,7 +1325,7 @@ def run_dual(args):
     elif not os.path.isfile(sync_path):
         print("warning: no dead-ball rows: they need a sync file")
     elif args.dead_ball or dead_ball_stale:
-        why = "--dead-ball" if args.dead_ball else "missing" if dead_ball_age is None else "older than the sync file or the exports"
+        why = "--dead-ball" if args.dead_ball else "missing" if dead_ball_age is None else "older than the sync file, the exports or the dead_ball_investigation code"
         print(f"\n=== dead_ball_investigation -> export/dead_ball.json ({why}) ===")
         r = subprocess.run([sys.executable, dead_ball_run, "--sync", sync_path, "--from-exports",
                             "--tactical-export", tac_dir, "--broadcast-export", br_dir, "--out", dead_ball_json])

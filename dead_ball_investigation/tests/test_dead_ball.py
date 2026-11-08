@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import importlib.util
+import itertools
 import json
 import os
 import re
@@ -20,7 +21,8 @@ import numpy as np
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from dead_ball_investigation.dead_ball import (SyncedMatch, annotate, annotate_dead_ball, dead_ball_mask,
-                                               dead_ball_terms, intervals_to_mask, mask_to_intervals, to_document)
+                                               dead_ball_terms, intervals_to_mask, mask_to_intervals,
+                                               runs_overlapping, to_document)
 from dead_ball_investigation.signals import SourceSignals, homography_missing, load_from_export
 from dead_ball_investigation.sync import SyncMap
 
@@ -94,13 +96,25 @@ class TestSyncMap(unittest.TestCase):
 
 class TestFormula(unittest.TestCase):
     def test_truth_table(self):
-        # columns: B hom missing, B count off, T ball missing, B ball missing
-        rows = np.array([[a, b, c, d] for a in (0, 1) for b in (0, 1) for c in (0, 1) for d in (0, 1)], bool)
-        dead = dead_ball_mask(*rows.T)
-        expect = (rows[:, 0] & rows[:, 1]) | (rows[:, 2] & rows[:, 3])
-        self.assertEqual(dead.tolist(), expect.tolist())
-        no_view, ball_lost, union = dead_ball_terms(*rows.T)
-        self.assertEqual((no_view | ball_lost).tolist(), union.tolist())
+        # one frame on its own: ball lost only counts together with no view, so dead == no view
+        for a, b, c, d in itertools.product((0, 1), repeat=4):   # B hom missing, B count off, T ball, B ball
+            no_view, ball_lost, kept, dead = dead_ball_terms([a], [b], [c], [d])
+            self.assertEqual(bool(no_view[0]), bool(a and b))
+            self.assertEqual(bool(ball_lost[0]), bool(c and d))
+            self.assertEqual(bool(kept[0]), bool(a and b and c and d))
+            self.assertEqual(bool(dead[0]), bool(a and b), (a, b, c, d))
+            self.assertEqual(dead.tolist(), dead_ball_mask([a], [b], [c], [d]).tolist())
+
+    def test_ball_lost_needs_overlap(self):
+        nv = intervals_to_mask([[10, 12], [30, 31]], 0, 60)
+        bl = intervals_to_mask([[5, 10], [13, 15], [20, 25], [28, 40], [50, 52]], 0, 60)
+        on = np.ones(60, bool)
+        dead = lambda gap=0: mask_to_intervals(dead_ball_mask(nv, on, bl, on, gap))
+        self.assertEqual(dead(), [[5, 12], [28, 40]])           # [13, 15] only touches [10, 12]
+        self.assertEqual(dead(1), [[5, 15], [28, 40]])
+        self.assertEqual(dead(5), [[5, 15], [20, 25], [28, 40]])  # [20, 25] is 8 frames from 12 but 5 from 30
+        self.assertEqual(runs_overlapping(bl, np.zeros(60, bool)).sum(), 0)
+        self.assertEqual(mask_to_intervals(runs_overlapping(bl, nv)), [[5, 10], [28, 40]])
 
     def test_intervals_roundtrip(self):
         m = np.array([1, 1, 0, 0, 1, 0, 1, 1, 1], bool)
@@ -127,24 +141,29 @@ class TestSyncedMatch(unittest.TestCase):
         r = annotate(self.match, "tactical")
         self.assertEqual(r.intervals("no_view"), [[3, 4], [71, 71]])
         self.assertEqual(r.intervals("ball_lost"), [[5, 6], [20, 20]])
-        self.assertEqual(r.intervals("dead"), [[3, 6], [20, 20], [71, 71]])
+        self.assertEqual(r.intervals("ball_lost_kept"), [])    # T 5, 6 touch no view at T 4 but do not overlap it
+        self.assertEqual(r.intervals("dead"), [[3, 4], [71, 71]])
         self.assertEqual(r.intervals("covered"), [[0, 39], [60, 99]])
         self.assertFalse(r.dead[45])                           # tactical ball missing, no broadcast counterpart
+        self.assertEqual(annotate(self.match, "tactical", max_gap=1).intervals("dead"), [[3, 6], [71, 71]])
 
     def test_no_counterpart_policy(self):
         r = annotate(self.match, "tactical", no_counterpart=True)
         self.assertTrue(r.dead[40:60].all())                   # unmapped frames: B hom ∅ and count off assumed
         self.assertEqual(r.intervals("ball_lost"), [[5, 6], [20, 20], [45, 45]])
+        self.assertEqual(r.intervals("ball_lost_kept"), [[45, 45]])  # inside the assumed no view
 
     def test_broadcast_timeline_agrees(self):
-        res = annotate_dead_ball(self.match)
-        t, b = res["tactical"], res["broadcast"]
-        for bf in range(90):
-            tf = self.match.sync.map(bf, "broadcast")
-            if tf >= 0:
-                self.assertEqual(bool(b.dead[bf]), bool(t.dead[tf]), f"B {bf} / T {tf}")
-        self.assertTrue(b.no_view[0] and b.no_view[1])         # broadcast-only term holds without a counterpart
-        self.assertEqual(b.intervals("dead"), [[0, 1], [13, 16], [30, 30], [61, 61]])
+        for gap in (0, 1):
+            res = annotate_dead_ball(self.match, max_gap=gap)
+            t, b = res["tactical"], res["broadcast"]
+            for bf in range(90):
+                tf = self.match.sync.map(bf, "broadcast")
+                if tf >= 0:
+                    self.assertEqual(bool(b.dead[bf]), bool(t.dead[tf]), f"gap {gap}: B {bf} / T {tf}")
+            self.assertTrue(b.no_view[0] and b.no_view[1])     # broadcast-only term holds without a counterpart
+        self.assertEqual(annotate(self.match, "broadcast").intervals("dead"), [[0, 1], [13, 14], [61, 61]])
+        self.assertEqual(b.intervals("dead"), [[0, 1], [13, 16], [61, 61]])
 
     def test_tags_and_document(self):
         tags = self.match.synced_tags()
@@ -153,8 +172,10 @@ class TestSyncedMatch(unittest.TestCase):
         doc = to_document(self.match, annotate_dead_ball(self.match), "sync.json", graded=[[0, 49]])
         doc = json.loads(json.dumps(doc))
         tl = doc["timelines"]["tactical"]
-        self.assertEqual(tl["dead_ball"], [[3, 6], [20, 20], [71, 71]])
-        self.assertEqual(tl["stats"]["graded"]["dead_frames"], 5)
+        self.assertEqual(tl["dead_ball"], [[3, 4], [71, 71]])
+        self.assertEqual(tl["terms"]["ball_lost"], [[5, 6], [20, 20]])
+        self.assertEqual(tl["terms"]["ball_lost_kept"], [])
+        self.assertEqual(tl["stats"]["graded"]["dead_frames"], 2)
         self.assertEqual(doc["timelines"]["broadcast"]["end"], 89)
         self.assertEqual(doc["smart_tags"][0]["broadcast"], [12, 18])
 
@@ -162,8 +183,12 @@ class TestSyncedMatch(unittest.TestCase):
         """Sources loaded over part of their video only (e.g. a gt-mode export)."""
         tac = signals("tactical", 20, start=10, ball=[12])
         br = signals("broadcast", 90, ball=[22])
+        br_hom = signals("broadcast", 90, ball=[22], hom=[21, 22], count=[22])
         r = annotate(SyncedMatch(tac, br, self.match.sync), "tactical")
         self.assertEqual(r.start, 10)
+        self.assertEqual(r.intervals("ball_lost"), [[12, 12]])
+        self.assertEqual(r.intervals("dead"), [])               # ball lost without a no view next to it
+        r = annotate(SyncedMatch(tac, br_hom, self.match.sync), "tactical")
         self.assertEqual(r.intervals("dead"), [[12, 12]])
 
 

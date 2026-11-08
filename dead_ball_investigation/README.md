@@ -1,9 +1,16 @@
 # Dead-ball intervals from the synchronised recordings
 
 ```
-dead ball = (broadcast homography missing  ∩  broadcast player count ≠ 22)      "no view"
-          ∪ (tactical ball missing         ∩  broadcast ball missing)           "ball lost"
+no view   = broadcast homography missing  ∩  broadcast player count ≠ 22
+ball lost = tactical ball missing         ∩  broadcast ball missing
+dead ball = no view  ∪  (the ball-lost intervals that overlap a no-view interval)
 ```
+
+A ball-lost interval joins the dead ball whole when it shares at least one frame with a no-view
+interval; a ball-lost interval on its own is not dead ball. `run.py --max-gap N` also accepts
+ball-lost intervals that end or start within N frames of a no-view interval. `dead_ball.json` keeps
+every ball-lost interval in `terms.ball_lost` and the accepted ones in `terms.ball_lost_kept`, so the
+viewers' BALL LOST T∩B row shows all of them and DEAD BALL only the accepted ones.
 
 The two recordings are put on one timeline with the kick-off anchors from
 `match_viewer/synchronize_videos.py` (`match_viewer/export/sync.json`). The mapping rule is the
@@ -36,7 +43,8 @@ python match_viewer/match_viewer.py --dual --mode full --export --serve
                                                            # 2. export both, compute dead_ball.json, open the dual view
 ```
 
-`--dual` computes `dead_ball.json` whenever it is missing or older than `sync.json` or either export;
+`--dual` computes `dead_ball.json` whenever it is missing or older than `sync.json`, either export
+or the `dead_ball_investigation/*.py` files;
 `--dead-ball` forces it. When the viewers have no dead-ball data they say so: the dual view shows
 "no dead-ball rows" next to the sync offset (hover it for the reason), the normal view in its title line.
 

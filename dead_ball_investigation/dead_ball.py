@@ -1,9 +1,13 @@
 """Dead-ball intervals from the synchronised tactical and broadcast recordings.
 
-    dead ball = (broadcast homography missing  ∩  broadcast player count ≠ 22)       "no view"
-              ∪ (tactical ball missing         ∩  broadcast ball missing)            "ball lost"
+    no view   = broadcast homography missing  ∩  broadcast player count ≠ 22
+    ball lost = tactical ball missing         ∩  broadcast ball missing
+    dead ball = no view ∪ (the ball-lost intervals that overlap a no-view interval)
 
-The formula is evaluated frame by frame on either timeline: the other recording's signals are
+A ball-lost interval is taken whole when it shares at least one frame with a no-view interval
+(or comes within `max_gap` frames of one); ball-lost intervals on their own are not dead ball.
+
+The terms are evaluated frame by frame on either timeline: the other recording's signals are
 pulled across through the sync map first. Frames with no counterpart (halftime cut, outside the
 other video) take `no_counterpart` for every signal of the missing side, False by default, so a
 missing counterpart is never by itself evidence of a dead ball.
@@ -24,23 +28,35 @@ from dead_ball_investigation.signals import SourceSignals  # noqa: E402
 from dead_ball_investigation.sync import SyncMap  # noqa: E402
 
 FORMULA = ("(broadcast homography missing ∩ broadcast player count ≠ 22) "
-           "∪ (tactical ball missing ∩ broadcast ball missing)")
+           "∪ (the (tactical ball missing ∩ broadcast ball missing) intervals overlapping it)")
 TERMS = {
     "no_view": "broadcast homography missing ∩ broadcast player count ≠ 22",
-    "ball_lost": "tactical ball missing ∩ broadcast ball missing",
+    "ball_lost": "tactical ball missing ∩ broadcast ball missing (every interval)",
+    "ball_lost_kept": "the ball_lost intervals that overlap a no_view interval (part of the dead ball)",
 }
 
 
-def dead_ball_terms(b_hom_missing, b_count_off, t_ball_missing, b_ball_missing):
-    """(no_view, ball_lost, dead) masks from four frame-aligned boolean masks."""
+def runs_overlapping(mask, seed, max_gap: int = 0):
+    """The runs of `mask` that share a frame with `seed`, or come within max_gap frames of it."""
+    mask, seed = np.asarray(mask, bool), np.asarray(seed, bool)
+    if max_gap > 0 and seed.any():
+        seed = np.convolve(seed, np.ones(2 * max_gap + 1), mode="same") > 0
+    ids = np.cumsum(mask & ~np.concatenate([[False], mask[:-1]])) * mask
+    keep = np.unique(ids[mask & seed])
+    return np.isin(ids, keep[keep > 0])
+
+
+def dead_ball_terms(b_hom_missing, b_count_off, t_ball_missing, b_ball_missing, max_gap: int = 0):
+    """(no_view, ball_lost, ball_lost_kept, dead) masks from four frame-aligned boolean masks."""
     no_view = np.asarray(b_hom_missing, bool) & np.asarray(b_count_off, bool)
     ball_lost = np.asarray(t_ball_missing, bool) & np.asarray(b_ball_missing, bool)
-    return no_view, ball_lost, no_view | ball_lost
+    kept = runs_overlapping(ball_lost, no_view, max_gap)
+    return no_view, ball_lost, kept, no_view | kept
 
 
-def dead_ball_mask(b_hom_missing, b_count_off, t_ball_missing, b_ball_missing):
+def dead_ball_mask(b_hom_missing, b_count_off, t_ball_missing, b_ball_missing, max_gap: int = 0):
     """The dead-ball formula on frame-aligned masks."""
-    return dead_ball_terms(b_hom_missing, b_count_off, t_ball_missing, b_ball_missing)[2]
+    return dead_ball_terms(b_hom_missing, b_count_off, t_ball_missing, b_ball_missing, max_gap)[3]
 
 
 def mask_to_intervals(mask, start: int = 0):
@@ -86,6 +102,7 @@ class DeadBall:
     dead: np.ndarray
     no_view: np.ndarray
     ball_lost: np.ndarray
+    ball_lost_kept: np.ndarray
     covered: np.ndarray
 
     def intervals(self, which: str = "dead"):
@@ -93,7 +110,7 @@ class DeadBall:
 
     def stats(self, graded=None):
         out = {"frames": int(len(self.dead)), "covered_frames": int(self.covered.sum())}
-        for k in ("dead", "no_view", "ball_lost"):
+        for k in ("dead", *TERMS):
             m = getattr(self, k)
             out[k] = {"frames": int(m.sum()), "share": round(float(m.mean()) if len(m) else 0.0, 4),
                       "intervals": len(mask_to_intervals(m))}
@@ -146,20 +163,21 @@ class SyncedMatch:
         return out
 
 
-def annotate(match: SyncedMatch, side: str = "tactical", no_counterpart: bool = False) -> DeadBall:
-    """Dead-ball mask (and its two terms) on the frames of one recording."""
+def annotate(match: SyncedMatch, side: str = "tactical", no_counterpart: bool = False, max_gap: int = 0) -> DeadBall:
+    """Dead-ball mask (and its terms) on the frames of one recording."""
     tl = match.timeline(side, no_counterpart)
-    no_view, ball_lost, dead = dead_ball_terms(tl.b_hom_missing, tl.b_count_off, tl.t_ball_missing, tl.b_ball_missing)
-    return DeadBall(side, tl.start, dead, no_view, ball_lost, tl.covered)
+    no_view, ball_lost, kept, dead = dead_ball_terms(tl.b_hom_missing, tl.b_count_off, tl.t_ball_missing,
+                                                     tl.b_ball_missing, max_gap)
+    return DeadBall(side, tl.start, dead, no_view, ball_lost, kept, tl.covered)
 
 
-def annotate_dead_ball(match: SyncedMatch, no_counterpart: bool = False):
+def annotate_dead_ball(match: SyncedMatch, no_counterpart: bool = False, max_gap: int = 0):
     """Dead-ball intervals on both timelines: {"tactical": DeadBall, "broadcast": DeadBall}."""
-    return {side: annotate(match, side, no_counterpart) for side in ("tactical", "broadcast")}
+    return {side: annotate(match, side, no_counterpart, max_gap) for side in ("tactical", "broadcast")}
 
 
 def to_document(match: SyncedMatch, result, sync_path: str | None = None, no_counterpart: bool = False,
-                graded=None, inputs=None):
+                graded=None, inputs=None, max_gap: int = 0):
     """The JSON written to match_viewer/export/dead_ball.json (read by match_viewer.html)."""
     timelines = {}
     for side, r in result.items():
@@ -174,9 +192,10 @@ def to_document(match: SyncedMatch, result, sync_path: str | None = None, no_cou
              "tactical": [e["a"], e["b"]], "broadcast": [e["broadcast_a"], e["broadcast_b"]]}
             for e in match.synced_tags()]
     return {
-        "version": 1,
+        "version": 2,
         "formula": FORMULA,
         "terms": TERMS,
+        "max_gap": int(max_gap),
         "fps": match.sync.fps,
         "frames": "absolute video frames of each timeline, intervals [first, last] inclusive",
         "no_counterpart": bool(no_counterpart),

@@ -94,6 +94,9 @@ def main(argv=None) -> int:
     ap.add_argument("--no-counterpart-missing", action="store_true",
                     help="treat the other recording's signals as missing (True) where a frame has no counterpart; "
                          "default: not missing, so an unmapped frame is never dead on that evidence alone")
+    ap.add_argument("--max-gap", type=int, default=0,
+                    help="a ball-lost interval joins the dead ball when it overlaps a no-view interval or comes "
+                         "within this many frames of one (default 0: it has to share a frame)")
     args = ap.parse_args(argv)
     require_repo()
 
@@ -101,11 +104,11 @@ def main(argv=None) -> int:
     print(f"\nsync: {len(match.sync.anchors)} anchor(s) from {args.sync}")
     for a in match.sync.anchors:
         print(f"  {a['label']:<32s} T {a['tactical']:>6d}  B {a['broadcast']:>6d}  offset {a['broadcast'] - a['tactical']:+d}")
-    print(f"formula: {FORMULA}")
+    print(f"formula: {FORMULA}" + (f"  (max gap {args.max_gap} frames)" if args.max_gap else ""))
 
-    result = annotate_dead_ball(match, args.no_counterpart_missing)
+    result = annotate_dead_ball(match, args.no_counterpart_missing, args.max_gap)
     doc = to_document(match, result, os.path.relpath(os.path.abspath(args.sync), REPO),
-                      args.no_counterpart_missing, graded_blocks(), inputs)
+                      args.no_counterpart_missing, graded_blocks(), inputs, args.max_gap)
     t = result["tactical"]
     check = gt_check(t.dead, t.start)
     if check:
@@ -115,8 +118,8 @@ def main(argv=None) -> int:
         s = doc["timelines"][side]["stats"]
         print(f"\n{side}: frames {r.start}..{r.start + len(r.dead) - 1}, counterpart on {s['covered_frames']} "
               f"({100 * s['covered_frames'] / max(1, s['frames']):.1f}%)")
-        for k in ("dead", "no_view", "ball_lost"):
-            print(f"  {k:<10s} {s[k]['frames']:>7d} frames ({100 * s[k]['share']:5.1f}%) in {s[k]['intervals']} intervals")
+        for k in ("dead", "no_view", "ball_lost", "ball_lost_kept"):
+            print(f"  {k:<14s} {s[k]['frames']:>7d} frames ({100 * s[k]['share']:5.1f}%) in {s[k]['intervals']} intervals")
         if "graded" in s:
             g = s["graded"]
             print(f"  graded frames: {100 * g['dead_share']:.1f}% dead ({g['dead_frames']} / {g['frames']})")
