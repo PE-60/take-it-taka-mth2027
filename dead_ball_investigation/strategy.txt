@@ -58,8 +58,9 @@ intersec = ∩
 
 
 (BroMH ∩ BroCN22) U (TacMB ∩ BroMB) <- Formula for Dead ball intervals
-
-
+Missing homography means no matrix at all. A high reprojection error doesn't count, even though the viewer's HOMOGRAPHY row colours errors above 3 red too.
+Frames without a counterpart (cut by the sync, or outside the other video) count as "not missing" for the other video. So a frame is never dead just because the other video has nothing there. --no-counterpart-missing flips this.
+No minimum interval length. Short flickers in ball tracking will create short intervals.
 
 Fine-tuning of the intervals - for the end of the interval look where the ball has a big acceleration, i.e. it's kicked
 

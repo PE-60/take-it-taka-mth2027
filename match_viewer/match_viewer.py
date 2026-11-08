@@ -24,6 +24,10 @@ Interactive viewer (match_viewer.html next to this script; exports go to match_v
     python match_viewer.py --dual --mode full --export --serve     # export both, sync, open
     python match_viewer.py --dual --mode full --serve              # reuse existing exports and sync file
     python match_viewer.py --dual --serve --resync                 # recompute export/sync.json first
+    python match_viewer.py --dual --serve --dead-ball              # force-recompute export/dead_ball.json first
+                                                                   # (done anyway when it is missing or stale)
+
+Dead-ball rows (both viewers): export/dead_ball.json, from `python dead_ball_investigation/run.py`
 
 AR flag overlays (optional): put referee_signals_tactical.json in match_viewer/export/
 (or pass --referee-signals PATH). Built by: python -m referee_signals --video ... (from the repo root)
@@ -1203,6 +1207,11 @@ def serve(root, port, export_dir=None, page="match_viewer.html", query=None):
         def __init__(self, *a, **k):
             super().__init__(*a, directory=root, **k)
 
+        def end_headers(self):
+            # pages and sidecars change between runs; without this the browser keeps serving old copies
+            self.send_header("Cache-Control", "no-cache")
+            super().end_headers()
+
         def send_head(self):
             path = self.translate_path(self.path)
             if os.path.isdir(path):
@@ -1304,6 +1313,24 @@ def run_dual(args):
         if r.returncode != 0:
             print("warning: synchronize_videos.py failed; the viewer starts unsynchronised "
                   "(line both videos up by hand and press 'anchor here')")
+    dead_ball_run = os.path.join(REPO, "dead_ball_investigation", "run.py")
+    dead_ball_json = os.path.join(HERE, "export", "dead_ball.json")
+    inputs = [sync_path] + [os.path.join(HERE, d, f) for d in (tac_dir, br_dir) for f in ("meta.json", "data.bin")]
+    dead_ball_age = os.path.getmtime(dead_ball_json) if os.path.isfile(dead_ball_json) else None
+    dead_ball_stale = dead_ball_age is None or any(os.path.isfile(p) and os.path.getmtime(p) > dead_ball_age for p in inputs)
+    if not os.path.isfile(dead_ball_run):
+        if args.dead_ball or dead_ball_age is None:
+            print(f"warning: no dead-ball rows: {dead_ball_run} is missing (put dead_ball_investigation/ at the repo root)")
+    elif not os.path.isfile(sync_path):
+        print("warning: no dead-ball rows: they need a sync file")
+    elif args.dead_ball or dead_ball_stale:
+        why = "--dead-ball" if args.dead_ball else "missing" if dead_ball_age is None else "older than the sync file or the exports"
+        print(f"\n=== dead_ball_investigation -> export/dead_ball.json ({why}) ===")
+        r = subprocess.run([sys.executable, dead_ball_run, "--sync", sync_path, "--from-exports",
+                            "--tactical-export", tac_dir, "--broadcast-export", br_dir, "--out", dead_ball_json])
+        if r.returncode != 0:
+            print("warning: dead_ball_investigation failed; " +
+                  ("no dead-ball rows" if dead_ball_age is None else "the dead-ball rows keep their previous state"))
     query = {"t": tac_dir, "b": br_dir}
     if os.path.isfile(sync_path):
         query["sync"] = os.path.relpath(sync_path, HERE).replace(os.sep, "/")
@@ -1334,6 +1361,9 @@ def main():
                          "(with --export: export both first; --mode picks the tactical window)")
     ap.add_argument("--sync", help="--dual: sync file from synchronize_videos.py (default export/sync.json)")
     ap.add_argument("--resync", action="store_true", help="--dual: rerun synchronize_videos.py even if the sync file exists")
+    ap.add_argument("--dead-ball", action="store_true",
+                    help="--dual: recompute export/dead_ball.json even if it is newer than the sync file and the exports "
+                         "(it is recomputed automatically when missing or older)")
     ap.add_argument("--dir", help="export folder to open (e.g. export/broadcast_full). "
                     "With --serve, also implied by --source/--mode when those flags are passed")
     ap.add_argument("--video")

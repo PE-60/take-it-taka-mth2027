@@ -14,6 +14,7 @@
   --good:#5adc5a; --warn:#f5d73c; --bad:#f03c3c;
   --ring:#ffe600; --kick:#ffc800; --jump:#c850ff; --churn:#ff8cc8; --lost:#f03c3c; --bolt:#e650e6; --air:#78dcff;
   --throw:#3cc8ff; --corner:#ffc83c; --goalkick:#ff78c8; --freekick:#5adc5a; --kickoff:#ffffff;
+  --dbview:#ff9f40; --dbball:#c88cff;
   font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; font-size:13px; line-height:1.35;
   font-variant-numeric:tabular-nums; color:var(--fg); background:var(--bg);
 }
@@ -123,6 +124,7 @@ textarea{width:100%;background:var(--panel2);border:1px solid var(--line2);borde
       <option value="gt_vs_pred">GT ≠ prediction (segment starts)</option>
       <option value="gt_change">GT transitions</option>
       <option value="restart">restarts (dead ball ends)</option>
+      <option value="dead">dead ball, derived (interval starts)</option>
       <option value="kick">kicks</option>
       <option value="referee">AR flag signals</option>
       <option value="lost">ball lost (stretch starts)</option>
@@ -183,7 +185,7 @@ textarea{width:100%;background:var(--panel2);border:1px solid var(--line2);borde
     <button id="bRows">rows ▾</button><div id="rowpop"></div>
     <span class="lbl">step events</span>
     <select id="stepType">
-      <option value="restart">restarts</option><option value="gt_change">GT transitions</option><option value="kick">kicks</option>
+      <option value="restart">restarts</option><option value="dead">dead ball (derived)</option><option value="gt_change">GT transitions</option><option value="kick">kicks</option>
       <option value="referee">AR flags</option>
       <option value="lost">ball lost</option><option value="jump">teleports</option><option value="churn">vanish/appear</option><option value="cand">candidate queue</option>
     </select>
@@ -283,11 +285,21 @@ class EventIndex {
     this.refereeFrames = [...new Set(this.refereeFrames)].sort((a, b) => a - b);
     this.refereeSignalFrames = [...new Set(this.refereeSignalFrames)].sort((a, b) => a - b);
   }
+  /** Dead-ball intervals from dead_ball_investigation (export/dead_ball.json), on this export's timeline. */
+  ingestDeadBall(doc, source) {
+    const tl = doc && doc.timelines && doc.timelines[source]; if (!tl) return false;
+    const n = this.ds.n, start = this.ds.start;
+    const mask = intervals => { const m = new Uint8Array(n); for (const [a, b] of intervals || []) { const r0 = Math.max(0, a - start), r1 = Math.min(n - 1, b - start); if (r1 >= r0) m.fill(1, r0, r1 + 1); } return m; };
+    this.dead = { doc, mask: mask(tl.dead_ball), noView: mask(tl.terms && tl.terms.no_view), ballLost: mask(tl.terms && tl.terms.ball_lost), covered: mask(tl.covered) };
+    this.deadStarts = []; for (let r = 0; r < n; r++) if (this.dead.mask[r] && (r === 0 || !this.dead.mask[r - 1])) this.deadStarts.push(r);
+    return true;
+  }
   list(name) {
     switch (name) {
       case 'restart': return this.restartFrames; case 'gt_change': return this.gtChanges; case 'kick': return [...this.kick].sort((a, b) => a - b);
       case 'lost': return this.lostStarts; case 'jump': return this.jumpFrames; case 'churn': return this.churnFrames;
       case 'referee': return this.refereeSignalFrames.length ? this.refereeSignalFrames : this.refereeFrames;
+      case 'dead': return this.deadStarts || [];
     }
     return [];
   }
@@ -640,11 +652,12 @@ const RG = 2, GG = 9, FLAG = 14;
 // A strip just reuses one of the rows, a band is a per bin summary from aggregateBands.
 const OVERVIEW_ITEMS = [
   { name: 'GT', kind: 'strip', row: 'GT' }, { name: 'PRED', kind: 'strip', row: 'PRED' }, { name: 'L&H', kind: 'strip', row: 'L&H' }, { name: 'SEGMENT', kind: 'strip', row: 'SEGMENT' },
+  { name: 'DEAD BALL', kind: 'strip', row: 'DEAD BALL' },
   { name: 'restarts', kind: 'band', key: 'restarts', count: true, color: 'good' }, { name: 'kicks', kind: 'band', key: 'kicks', count: true, color: 'kick' },
   { name: 'ball lost', kind: 'band', key: 'lostFrac', color: 'lost' }, { name: 'L&H share', kind: 'band', key: 'share' },
   { name: 'player count off', kind: 'band', key: 'countBad', color: 'warn' }, { name: 'homography bad', kind: 'band', key: 'homBad', color: 'bad' },
 ];
-const OVERVIEW_DEFAULT = ['GT', 'restarts', 'ball lost', 'L&H share'];
+const OVERVIEW_DEFAULT = ['GT', 'DEAD BALL', 'restarts', 'ball lost', 'L&H share'];
 
 const LAYERS = [
   ['pitch', 'pitch lines', true], ['players', 'players', true], ['holder', 'L&H holder disc', true], ['ring', 'possession ring', true],
@@ -659,6 +672,7 @@ const ROW_PRESETS = {
   'events': ['GT', 'RESTART', 'KICK', 'AR FLAGS', 'ANN EVENTS', 'BOOKMARK'],
   'data quality': ['GT', 'BALL LOST', 'BALL JUMP', 'PLAYER JUMP', 'DROPOUT <0.5 s', 'VANISH/APPEAR', 'COUNT ≠ 22', '› BOLT', 'HOMOGRAPHY', 'ANN DATA'],
   'annotation': ['GT', 'SEGMENT', 'MINE', 'ANN EVENTS', 'ANN DATA', 'SEGMENT B', 'ANN B', 'BOOKMARK'],
+  'dead ball': ['GT', 'DEAD BALL', 'NO VIEW (HOM ∅ ∩ ≠22)', 'BALL LOST T∩B', 'NO COUNTERPART', 'RESTART', 'BALL LOST', 'COUNT ≠ 22', 'HOMOGRAPHY'],
   'minimal': ['GT', 'L&H', 'RESTART', 'BALL LOST'],
 };
 
@@ -713,6 +727,19 @@ async function loadRefereeSidecars() {
   }
   if (!E.refereeFrames.length) console.warn('[referee] no meta.referee and no sidecar JSON found');
 }
+const DEAD_BALL_HINT = 'python dead_ball_investigation/run.py --from-exports';
+async function loadDeadBall() {
+  // written by dead_ball_investigation/run.py; holds intervals for both timelines
+  const src = ds.meta.source || 'tactical';
+  E.deadMissing = 'no export/dead_ball.json';
+  for (const url of [exportDir + '/dead_ball.json', 'export/dead_ball.json']) {
+    const doc = await tryFetchJson(url);
+    if (!doc) continue;
+    if (E.ingestDeadBall(doc, src)) { E.deadMissing = null; console.info('[dead ball] loaded', url, '→', E.deadStarts.length, 'intervals in this export'); return; }
+    E.deadMissing = `${url} has no ${src} timeline`;
+  }
+  console.warn('[dead ball]', E.deadMissing, '— run:', DEAD_BALL_HINT);
+}
 async function load() {
   exportDir = q.get('d');
   if (!exportDir) { try { exportDir = (await (await fetch('export/latest.json')).json()).dir; } catch (e) { exportDir = 'export/tactical_gt'; } }
@@ -722,9 +749,10 @@ async function load() {
   ds = new DataSet(meta, new Float32Array(buf));
   E = deriveEvents(ds);
   await loadRefereeSidecars();
+  await loadDeadBall();
   store = new AnnotationStore({ get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } }, 'pv2:' + exportDir, ds);
   const nRef = E.refereeFrames.length;
-  $('#srcName').textContent = `${meta.source} · frames ${meta.start}-${meta.end} · ${(ds.n / ds.fps / 60).toFixed(1)} min` + (nRef ? ` · AR boxes on ${nRef} frames` : '');
+  $('#srcName').textContent = `${meta.source} · frames ${meta.start}-${meta.end} · ${(ds.n / ds.fps / 60).toFixed(1)} min` + (nRef ? ` · AR boxes on ${nRef} frames` : '') + (E.dead ? ` · ${E.deadStarts.length} dead-ball intervals` : ` · no dead-ball rows (${E.deadMissing}; run ${DEAD_BALL_HINT})`);
   document.title = `Match viewer · ${meta.source}`;
   const v = $('#v'); v.src = meta.video;
   v.addEventListener('loadedmetadata', init, { once: true });
@@ -984,7 +1012,7 @@ function candidateList(t) {
     gt_vs_lh: () => ds.meta.gt ? segmentStarts(r => alive(r) && P.lh[r] && P.lh[r] !== gt(r)) : [],
     gt_vs_pred: () => (ds.meta.gt && ds.meta.pred) ? segmentStarts(r => gt(r) !== 'X' && ds.pred(r) !== gt(r)) : [],
     gt_change: () => E.gtChanges, restart: () => E.restartFrames, kick: () => E.list('kick'), referee: () => E.list('referee'),
-    lost: () => E.lostStarts, jump: () => E.jumpFrames, churn: () => E.churnFrames,
+    lost: () => E.lostStarts, jump: () => E.jumpFrames, churn: () => E.churnFrames, dead: () => E.list('dead'),
     ambig: () => segmentStarts(r => alive(r) && ringCount(r) !== -1 && ringCount(r) !== 1),
   };
   const label = {
@@ -992,6 +1020,7 @@ function candidateList(t) {
     restart: r => { const f = E.flags.find(x => x.r === r); return f ? f.name : 'GT dead → alive'; }, kick: r => `ball ${ds.ball(r) ? ds.ball(r).sf.toFixed(0) : '?'} m/s`,
     referee: r => { const dets = E.refereeByFrame.get(r) || []; return dets.map(d => `${d.official_id || 'AR'} ${d.signal}`).join(' · ') || 'flag'; },
     lost: r => { let e = r; while (e < ds.n && !ds.ball(e)) e++; return `${((e - r) / ds.fps).toFixed(1)} s`; },
+    dead: r => { const D = E.dead; let e = r, v = 0, bl = 0; while (e < ds.n && D.mask[e]) { v += D.noView[e]; bl += D.ballLost[e]; e++; } return `${((e - r) / ds.fps).toFixed(1)} s · ${v && bl ? 'both terms' : v ? 'no view (B)' : 'ball lost T∩B'}`; },
     jump: r => { const b = ds.meta.events.bjump.find(e => e[0] === r); if (b) return `ball ${b[1].toFixed(1)} m`; const p = ds.meta.events.pjump.find(e => e[0] === r); return p ? `#${ds.numOf(p[1])} ${p[2].toFixed(1)} m` : ''; },
     churn: r => [...ds.meta.events.vanish.filter(e => e[0] === r).map(e => 'lost #' + ds.numOf(e[1])), ...ds.meta.events.appear.filter(e => e[0] === r).map(e => 'new #' + ds.numOf(e[1]))].join(', '),
     ambig: r => `${ringCount(r)} within ${tp} m`,
@@ -1084,6 +1113,7 @@ function buildLegend() {
   const el = $('#legend'); el.innerHTML = '';
   const items = [['tri_up', col('good'), 'GT dead → alive', 'RESTART'], ...Object.entries(RESTART_GLYPHS).map(([n, [g, c]]) => [g, c, n.toLowerCase(), 'RESTART']), ['pin', '#fff', 'bookmark', 'BOOKMARK'],
     [null, col('kick'), 'kick', 'KICK'], [null, col('lost'), 'ball lost', 'BALL LOST'], [null, col('jump'), 'teleport', 'PLAYER JUMP'], [null, col('churn'), 'vanish / appear', 'VANISH/APPEAR'], [null, col('bolt'), `› Bolt ${ds.meta.bolt} m/s`, '› BOLT'], [null, TEAM.H, 'Barcelona', 'GT'], [null, TEAM.A, 'Athletic', 'GT'], [null, TEAM.D, 'dead ball', 'GT']];
+  if (E.dead) items.push([null, col('dbview'), 'no view: broadcast hom ∅ ∩ ≠22', 'NO VIEW (HOM ∅ ∩ ≠22)'], [null, col('dbball'), 'ball lost T∩B', 'BALL LOST T∩B']);
   for (const [k, c, t, row] of items) { if (row && !rowVisible(row)) continue; const s = document.createElement('span'); const cv = document.createElement('canvas'); cv.width = cv.height = 24; const g = cv.getContext('2d'); g.scale(2, 2); if (k) glyph(g, k, 6, 6, 4.5, c); else { g.fillStyle = c; g.fillRect(2, 3, 8, 6); } s.appendChild(cv); s.append(t); el.appendChild(s); }
 }
 function setupHelp() {
@@ -1271,6 +1301,7 @@ function updateInfo() {
   const k = P.lhPid[r]; if (k >= 0 && b) { const hp = ds.slot(r, k); let press = 0; for (const p of PL) if (ds.sideOf(p.k) !== ds.sideOf(k) && ds.metres(hp, p) <= 3) press++; row('L&H holder', `#${ds.numOf(k)} · pressure ${press} opp &lt; 3 m`, TEAM[ds.sideOf(k)]); }
   let fast = null; for (const p of PL) if (Number.isFinite(p.sd) && (!fast || p.sd > fast.sd)) fast = p; if (fast) row('fastest', `#${ds.numOf(fast.k)} ${fast.sd.toFixed(1)} m/s${fast.sd > ds.meta.bolt ? ' › Bolt' : ''}`, fast.sd > ds.meta.bolt ? col('bolt') : null);
   if (ds.meta.hom_err) { const e = ds.meta.hom_err[r]; row('homography err', e < 0 ? 'none' : e.toFixed(2), e < 0 || e > 3 ? col('bad') : e > 1 ? col('warn') : col('good')); }
+  if (E.dead) { const D = E.dead; row('dead ball (sync)', !D.covered[r] && !D.mask[r] ? 'no counterpart' : D.mask[r] ? [D.noView[r] && 'no view (B)', D.ballLost[r] && 'ball lost T∩B'].filter(Boolean).join(' + ') : 'alive', D.mask[r] ? TEAM.D : null); }
   const hd = ds.attackDir(f); if (hd) row('attack', `BAR ${hd > 0 ? '→' : '←'} · ATH ${hd > 0 ? '←' : '→'}`);
   for (const e of ds.meta.tags.filter(e => e.a <= f && f < e.b)) row(e.restart ? 'restart' : 'tag', e.restart ? `${e.restart[0]} · ${e.team || '-'}` : `${e.code} · ${e.team || '-'}`, e.restart ? rgb(e.restart[1]) : TEAM[e.side] || null);
   const seg = store.segmentAt(r); if (seg.state !== 'clear') row('my reading', `${seg.team || '-'} · ${seg.state}`, TEAM[store.derivedLabel(r)]);
@@ -1291,6 +1322,11 @@ function buildRows() {
   pr.push(lab('NAIVE', r => P.naive[r]), lab('L&H', r => P.lh[r]), { name: 'SEGMENT', kind: 'segment', layer: 'A' }, lab('MINE', r => store.derivedLabel(r)));
   if (store.layerB.segments.length) pr.push({ name: 'SEGMENT B', kind: 'segment', layer: 'B' });
   grp('possession', pr);
+  if (E.dead) {
+    const D = E.dead;
+    grp('dead ball (sync)', [mask('DEAD BALL', r => D.mask[r], TEAM.D), mask('NO VIEW (HOM ∅ ∩ ≠22)', r => D.noView[r], col('dbview')),
+      mask('BALL LOST T∩B', r => D.ballLost[r], col('dbball')), mask('NO COUNTERPART', r => !D.covered[r], '#5f656d')]);
+  }
   const ev = [{ name: 'RESTART', kind: 'restart' }, mask('KICK', r => E.kick.has(r), col('kick'))];
   if (E.refereeFrames && E.refereeFrames.length) {
     const refColor = (ds.meta.referee && ds.meta.referee.styles && ds.meta.referee.styles.attention_raised)
@@ -1351,7 +1387,7 @@ function setupTimeline() {
   c.addEventListener('mousedown', e => { if (e.offsetY < overviewHeight() + 4) { $('#v').pause(); seek(Math.round(e.offsetX / c.clientWidth * (ds.n - 1))); return; } tlDrag = { x0: e.offsetX, x1: e.offsetX }; });
   window.addEventListener('mousemove', e => { if (!tlDrag) return; const rct = c.getBoundingClientRect(); tlDrag.x1 = e.clientX - rct.left; drawTimeline(); });
   window.addEventListener('mouseup', () => { if (!tlDrag) return; const [a, b] = [tlDrag.x0, tlDrag.x1].sort((x, y) => x - y), W = c.clientWidth; if (b - a < 4) { $('#v').pause(); seek(xToFrame(a, W)); } else { view = [xToFrame(a, W), xToFrame(b, W)]; if (view[1] - view[0] < 10) view[1] = view[0] + 10; buildRows(); } tlDrag = null; drawTimeline(); });
-  c.addEventListener('mousemove', e => { const W = c.clientWidth, r = xToFrame(e.offsetX, W), tip = $('#tip2'); tip.style.display = 'block'; tip.style.left = (e.clientX + 12) + 'px'; tip.style.top = (e.clientY - 70) + 'px'; const b = ds.ball(r), seg = store.segmentAt(r); tip.innerHTML = `<b class="mono">${ds.start + r}</b> · ${(r / ds.fps).toFixed(1)} s<br>GT <b style="color:${TEAM[ds.gt(r) || 'X']}">${ds.gt(r) || '-'}</b> · naive <b style="color:${TEAM[P.naive[r]]}">${P.naive[r] || '-'}</b> · L&amp;H <b style="color:${TEAM[P.lh[r]]}">${P.lh[r] || '-'}</b>${ds.meta.pred ? ` · pred <b style="color:${TEAM[ds.pred(r)]}">${ds.pred(r)}</b>` : ''}${seg.state !== 'clear' ? `<br>mine ${seg.team || '-'} · ${seg.state}` : ''}<br>ball ${b ? b.sf.toFixed(1) + ' m/s' : 'lost'} · tracked ${ds.meta.count[r]}`; });
+  c.addEventListener('mousemove', e => { const W = c.clientWidth, r = xToFrame(e.offsetX, W), tip = $('#tip2'); tip.style.display = 'block'; tip.style.left = (e.clientX + 12) + 'px'; tip.style.top = (e.clientY - 70) + 'px'; const b = ds.ball(r), seg = store.segmentAt(r); tip.innerHTML = `<b class="mono">${ds.start + r}</b> · ${(r / ds.fps).toFixed(1)} s<br>GT <b style="color:${TEAM[ds.gt(r) || 'X']}">${ds.gt(r) || '-'}</b> · naive <b style="color:${TEAM[P.naive[r]]}">${P.naive[r] || '-'}</b> · L&amp;H <b style="color:${TEAM[P.lh[r]]}">${P.lh[r] || '-'}</b>${ds.meta.pred ? ` · pred <b style="color:${TEAM[ds.pred(r)]}">${ds.pred(r)}</b>` : ''}${seg.state !== 'clear' ? `<br>mine ${seg.team || '-'} · ${seg.state}` : ''}<br>ball ${b ? b.sf.toFixed(1) + ' m/s' : 'lost'} · tracked ${ds.meta.count[r]}${E.dead && E.dead.mask[r] ? ` · <b style="color:${TEAM.D}">dead ball (sync)</b>` : ''}`; });
   c.addEventListener('mouseleave', () => $('#tip2').style.display = 'none');
   c.addEventListener('wheel', e => { e.preventDefault(); if (e.shiftKey) { $('#tlbody').scrollTop += e.deltaY || e.deltaX; return; } const W = c.clientWidth, r = xToFrame(e.offsetX, W), span = view[1] - view[0], k = e.deltaY > 0 ? 1.25 : .8, ns = Math.max(10, Math.min(ds.n - 1, span * k)); let a = r - (r - view[0]) * ns / span; a = Math.max(0, Math.min(ds.n - 1 - ns, a)); view = [Math.round(a), Math.round(a + ns)]; buildRows(); drawTimeline(); }, { passive: false });
   new ResizeObserver(drawTimeline).observe($('#tl'));

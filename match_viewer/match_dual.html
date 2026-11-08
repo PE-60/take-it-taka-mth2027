@@ -112,10 +112,12 @@ const LS = {
 };
 const KEY = 'pv:dual:' + q.get('t') + '|' + q.get('b');
 const RG = 2, GG = 10, OVH = 14;
-const DEFAULT_ROWS = ['GT', 'PRED', 'NAIVE', 'L&H', 'RESTART', 'KICK', 'BALL LOST', 'BALL SPEED', 'COUNT ≠ 22', 'HOMOGRAPHY'];
+const DEFAULT_ROWS = ['GT', 'PRED', 'NAIVE', 'L&H', 'DEAD BALL', 'RESTART', 'KICK', 'BALL LOST', 'BALL SPEED', 'COUNT ≠ 22', 'HOMOGRAPHY'];
 const DEFAULT_PAIRS = [['L&H', 'L&H'], ['GT', 'L&H']];
+const DEAD_ROWS = ['DEAD BALL', 'NO VIEW (HOM ∅ ∩ ≠22)', 'BALL LOST T∩B', 'NO COUNTERPART'];
 const PRESETS = {
   possession: ['GT', 'PRED', 'NAIVE', 'L&H', 'SEGMENT', 'MINE', 'RESTART', 'KICK'],
+  'dead ball': ['GT', ...DEAD_ROWS, 'RESTART', 'BALL LOST', 'COUNT ≠ 22', 'HOMOGRAPHY'],
   'data quality': ['BALL LOST', 'BALL SPEED', 'BALL JUMP', 'PLAYER JUMP', 'DROPOUT <0.5 s', 'VANISH/APPEAR', 'COUNT ≠ 22', '› BOLT', 'HOMOGRAPHY'],
   minimal: ['GT', 'L&H', 'BALL LOST', 'HOMOGRAPHY'],
 };
@@ -259,7 +261,23 @@ function updateReadout(force) {
   if (!force && s === lastReadout) return; lastReadout = s;
   $('#rT').textContent = `${T} · ${fmtT(T)}`; $('#rB').textContent = `${B} · ${fmtT(B)}`;
   $('#rOff').innerHTML = `offset ${off >= 0 ? '+' : ''}${off} f (${(off / fps).toFixed(2)} s) · ${seg}` +
-    (!linked ? ` · <span style="color:var(--warn)">now ${actual >= 0 ? '+' : ''}${actual} f (${actual - off >= 0 ? '+' : ''}${actual - off} vs sync)</span>` : '');
+    (!linked ? ` · <span style="color:var(--warn)">now ${actual >= 0 ? '+' : ''}${actual} f (${actual - off >= 0 ? '+' : ''}${actual - off} vs sync)</span>` : '') +
+    deadBallNote();
+}
+function deadBallNote() {
+  const warn = (text, title) => ` · <span style="color:var(--warn)" title="${title}">${text}</span>`;
+  const hint = 'run: python dead_ball_investigation/run.py --from-exports, then reload';
+  const Es = [panes.t, panes.b].map(p => p.pv && p.pv.E).filter(Boolean);
+  if (!Es.some(E => E.dead)) return warn('no dead-ball rows', `${(Es.find(E => E.deadMissing) || {}).deadMissing || 'no export/dead_ball.json'}; ${hint}`);
+  if (deadBallStale()) return warn('dead-ball rows use other anchors', `dead_ball.json was computed with other sync anchors; ${hint}`);
+  if (Es.every(E => !E.dead || !E.deadStarts.length)) return warn('0 dead-ball intervals', `dead_ball.json has no intervals inside these exports; ${hint}`);
+  return '';
+}
+// dead_ball.json was computed with the anchors it records; flag it when the live anchors differ
+function deadBallStale() {
+  const D = panes.t.pv && panes.t.pv.E && panes.t.pv.E.dead; if (!D) return false;
+  const used = ((D.doc.sync && D.doc.sync.anchors) || []).map(a => `${a.tactical}:${a.broadcast}`).join();
+  return used !== sync.A.map(a => `${a.t}:${a.b}`).join();
 }
 
 // ---------------------------------------------------------------- anchors popover
@@ -477,6 +495,8 @@ async function boot() {
   if (panes.b.ds.fps !== fps) fail(`the two exports have different fps (${fps} vs ${panes.b.ds.fps}); frame mapping assumes they match`);
   wirePane(panes.t); wirePane(panes.b);
   selected = LS.get(KEY + ':rows', null) || DEFAULT_ROWS.slice(); pairs = LS.get(KEY + ':pairs', null) || DEFAULT_PAIRS.map(p => p.slice());
+  // a saved row choice predates the dead-ball rows: show the main one once, then leave the choice alone
+  if (rowOf(panes.t, 'DEAD BALL') && !LS.get(KEY + ':deadSeen', false)) { if (!selected.includes('DEAD BALL')) selected.push('DEAD BALL'); LS.set(KEY + ':deadSeen', true); LS.set(KEY + ':rows', selected); }
   ref = LS.get(KEY + ':axis', 't'); $('#axis').value = ref; view = fullRange();
   ready = true;
   setupTimeline(); renderAnchors(); setLinked(true); setLeader('t');
