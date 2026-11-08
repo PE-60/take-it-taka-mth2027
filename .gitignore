@@ -65,5 +65,6 @@ env/
 
 
 # exported data from the local instance of match viewer (just local data from loading the match)
-export/*
 match_viewer/export/*
+!match_viewer/export/dead_ball.json
+

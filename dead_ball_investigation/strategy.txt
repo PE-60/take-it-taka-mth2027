@@ -67,3 +67,7 @@ No minimum interval length. Short flickers in ball tracking will create short in
 
 Fine-tuning of the intervals - for the end of the interval look where the ball has a big acceleration, i.e. it's kicked
 
+For the formula for dead ball intervals, we want better info about the missing ball intervals
+Is the ball missing because it's in play and there is bad tracking, or is it missing because it went out of the field!!!
+Missing but in play: in this interval the velocity of the ball is not enough for it to exit (straight line interpolation) and players are moving in the direction of the ball before it went missing
+
