@@ -3,6 +3,7 @@
     ball missing        ~isfinite(atd["ball"][:, 0])                      timeline row BALL LOST
     player count        atd["count"]  (track slots with a position)       timeline row COUNT != 22
     homography missing  no row, valid == 0, or a non-finite matrix        "homography  none"
+    ball position       atd["ball"][:, :2] x pitch size, in metres (NaN where missing)
 
 Two ways to get them:
   * load_source()       from the raw files, through match_viewer.load_atd / load_homography
@@ -43,6 +44,12 @@ def viewer():
     return _MV
 
 
+def pitch_m():
+    """Pitch size in metres (games.py); ATD positions are fractions of it."""
+    from games import GAME, GAMES
+    return tuple(GAMES[GAME]["pitch"])
+
+
 @dataclass
 class SourceSignals:
     """Signals for video frames start .. start + len - 1 of one recording."""
@@ -51,12 +58,16 @@ class SourceSignals:
     ball_missing: np.ndarray      # bool
     count: np.ndarray             # int, tracked players per frame
     hom_missing: np.ndarray       # bool
+    ball_xy: np.ndarray | None = None   # (n, 2) ball position in metres, NaN where missing
 
     def __post_init__(self):
         self.ball_missing = np.asarray(self.ball_missing, dtype=bool)
         self.count = np.asarray(self.count, dtype=np.int64)
         self.hom_missing = np.asarray(self.hom_missing, dtype=bool)
-        if not (len(self.ball_missing) == len(self.count) == len(self.hom_missing)):
+        if self.ball_xy is None:
+            self.ball_xy = np.full((len(self.count), 2), np.nan)
+        self.ball_xy = np.asarray(self.ball_xy, dtype=np.float64).reshape(-1, 2)
+        if not (len(self.ball_missing) == len(self.count) == len(self.hom_missing) == len(self.ball_xy)):
             raise ValueError(f"{self.source}: signal lengths differ")
 
     @property
@@ -83,16 +94,17 @@ def homography_missing(hom, start: int, end: int) -> np.ndarray:
     return out
 
 
-def signals_from_viewer_data(source: str, start: int, end: int, atd, hom) -> SourceSignals:
+def signals_from_viewer_data(source: str, start: int, end: int, atd, hom, pitch=None) -> SourceSignals:
     """Signals from what match_viewer.load_atd / load_homography return."""
     n = end - start + 1
     if atd:
         ball_missing = ~np.isfinite(atd["ball"][:, 0])
         count = atd["count"]
+        ball_xy = atd["ball"][:, :2] * np.asarray(pitch or pitch_m())
     else:
-        ball_missing, count = np.ones(n, dtype=bool), np.zeros(n, dtype=np.int64)
+        ball_missing, count, ball_xy = np.ones(n, dtype=bool), np.zeros(n, dtype=np.int64), None
     hom_missing = homography_missing(hom, start, end) if hom is not None else np.ones(n, dtype=bool)
-    return SourceSignals(source, start, ball_missing, count, hom_missing)
+    return SourceSignals(source, start, ball_missing, count, hom_missing, ball_xy)
 
 
 def find_inputs(source: str):
@@ -113,7 +125,7 @@ def load_source(source: str, start: int = 0, end: int | None = None) -> SourceSi
     print(f"--- {source}: frames {start}..{end}")
     atd, _meta, _home = mv.load_atd(atd_raw, atd_meta, start, end)
     hom = mv.load_homography(hom_path)
-    return signals_from_viewer_data(source, start, end, atd, hom)
+    return signals_from_viewer_data(source, start, end, atd, hom, mv.PITCH_M)
 
 
 def _tag(a, b, code, type_, team):
@@ -140,8 +152,8 @@ def load_from_export(export_dir: str) -> SourceSignals:
     """Signals from a match_viewer export folder (what match_viewer.html itself reads).
 
     data.bin holds `block` float32 per frame: 9 homography values (NaN where there is none), then
-    ball x, y, ... So ball missing is a NaN ball x, homography missing is a NaN first matrix entry,
-    and the player count is meta["count"].
+    ball x, y, ... as fractions of meta["pitch"]. So ball missing is a NaN ball x, homography
+    missing is a NaN first matrix entry, and the player count is meta["count"].
     """
     if not os.path.isabs(export_dir):
         export_dir = os.path.join(VIEWER_DIR, export_dir)
@@ -153,4 +165,6 @@ def load_from_export(export_dir: str) -> SourceSignals:
         raise ValueError(f"{export_dir}: data.bin has {data.size} floats, expected {n} x {block}")
     data = data.reshape(n, block)
     count = np.asarray(meta["count"], dtype=np.int64) if meta.get("count") else np.zeros(n, dtype=np.int64)
-    return SourceSignals(meta["source"], int(meta["start"]), ~np.isfinite(data[:, 9]), count, ~np.isfinite(data[:, 0]))
+    ball_xy = data[:, 9:11].astype(np.float64) * np.asarray(meta.get("pitch") or pitch_m())
+    return SourceSignals(meta["source"], int(meta["start"]), ~np.isfinite(data[:, 9]), count,
+                         ~np.isfinite(data[:, 0]), ball_xy)

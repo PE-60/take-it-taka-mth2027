@@ -2,7 +2,8 @@
 
     python dead_ball_investigation/run.py                 # from the raw data files (parses both ATDs)
     python dead_ball_investigation/run.py --from-exports  # from match_viewer exports (fast)
-    python dead_ball_investigation/run.py --no-counterpart-missing --out other.json
+    python dead_ball_investigation/run.py --from-exports --still-radius 2   # step 2 with a 2 m radius
+    python dead_ball_investigation/run.py --from-exports --skip-counterpart-step --skip-still-step  # baseline
 
 Every file in the package also runs as a file from any directory; `python -m dead_ball_investigation`
 works from the repo root.
@@ -23,7 +24,8 @@ import numpy as np
 if __package__ in (None, ""):  # run as a file: make the package importable
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from dead_ball_investigation.dead_ball import FORMULA, SyncedMatch, annotate_dead_ball, to_document  # noqa: E402
+from dead_ball_investigation.dead_ball import (FORMULA, STILL_RADIUS_M, TERMS, Params, SyncedMatch,  # noqa: E402
+                                               annotate_dead_ball, to_document)
 from dead_ball_investigation.paths import EXPORT_DIR, REPO, require_repo  # noqa: E402
 from dead_ball_investigation.signals import (load_from_export, load_source, load_tags,  # noqa: E402
                                              load_tags_from_export)
@@ -80,7 +82,12 @@ def build_match(args) -> tuple[SyncedMatch, dict]:
     for name, s in (("tactical", tac), ("broadcast", br)):
         if s.source != name:
             sys.exit(f"--{name}-export holds a {s.source} export")
-    return SyncedMatch(tac, br, sync, tags), inputs
+    try:
+        from games import source_frames
+        frames = {side: source_frames(side) for side in ("tactical", "broadcast")}
+    except Exception:  # noqa: BLE001
+        frames = None
+    return SyncedMatch(tac, br, sync, tags, frames), inputs
 
 
 def main(argv=None) -> int:
@@ -93,39 +100,57 @@ def main(argv=None) -> int:
     ap.add_argument("--broadcast-export", default="export/broadcast_full", help="with --from-exports (relative to match_viewer/)")
     ap.add_argument("--no-counterpart-missing", action="store_true",
                     help="treat the other recording's signals as missing (True) where a frame has no counterpart; "
-                         "default: not missing, so an unmapped frame is never dead on that evidence alone")
+                         "default: not missing, so for the baseline an unmapped frame is never dead on that evidence alone")
     ap.add_argument("--max-gap", type=int, default=0,
                     help="a ball-lost interval joins the dead ball when it overlaps a no-view interval or comes "
                          "within this many frames of one (default 0: it has to share a frame)")
+    ap.add_argument("--skip-counterpart-step", action="store_true",
+                    help="leave out step 1 (frames without a counterpart in the other video are dead)")
+    ap.add_argument("--skip-still-step", action="store_true",
+                    help="leave out step 2 (fill gaps between dead intervals in which the ball stays still)")
+    ap.add_argument("--still-radius", type=float, default=STILL_RADIUS_M,
+                    help=f"step 2: the ball counts as still while it stays within this many metres of where it is "
+                         f"first seen in the gap (default {STILL_RADIUS_M})")
     args = ap.parse_args(argv)
     require_repo()
+    params = Params(max_gap=args.max_gap, unmapped_signals_missing=args.no_counterpart_missing,
+                    counterpart_step=not args.skip_counterpart_step, still_step=not args.skip_still_step,
+                    still_radius_m=args.still_radius)
 
     match, inputs = build_match(args)
     print(f"\nsync: {len(match.sync.anchors)} anchor(s) from {args.sync}")
     for a in match.sync.anchors:
         print(f"  {a['label']:<32s} T {a['tactical']:>6d}  B {a['broadcast']:>6d}  offset {a['broadcast'] - a['tactical']:+d}")
-    print(f"formula: {FORMULA}" + (f"  (max gap {args.max_gap} frames)" if args.max_gap else ""))
+    print(f"formula: {FORMULA}")
+    print("params:  " + "  ".join(f"{k}={v}" for k, v in params.to_json().items()))
 
-    result = annotate_dead_ball(match, args.no_counterpart_missing, args.max_gap)
+    result = annotate_dead_ball(match, params)
     doc = to_document(match, result, os.path.relpath(os.path.abspath(args.sync), REPO),
-                      args.no_counterpart_missing, graded_blocks(), inputs, args.max_gap)
+                      params, graded_blocks(), inputs)
     t = result["tactical"]
-    check = gt_check(t.dead, t.start)
-    if check:
-        doc["timelines"]["tactical"]["public_gt"] = check
+    checks = {k: gt_check(getattr(t, k), t.start) for k in ("baseline", "dead")}
+    if checks["dead"]:
+        doc["timelines"]["tactical"]["public_gt"] = checks["dead"]
+        doc["timelines"]["tactical"]["public_gt_baseline"] = checks["baseline"]
 
     for side, r in result.items():
         s = doc["timelines"][side]["stats"]
         print(f"\n{side}: frames {r.start}..{r.start + len(r.dead) - 1}, counterpart on {s['covered_frames']} "
               f"({100 * s['covered_frames'] / max(1, s['frames']):.1f}%)")
-        for k in ("dead", "no_view", "ball_lost", "ball_lost_kept"):
+        for k in ("dead", *TERMS):
             print(f"  {k:<14s} {s[k]['frames']:>7d} frames ({100 * s[k]['share']:5.1f}%) in {s[k]['intervals']} intervals")
+        if "still_gaps" in s:
+            g = s["still_gaps"]
+            print(f"  step 2: {g['gaps']} gaps, {g['filled']} filled ({g['filled_frames']} frames), "
+                  f"{g['moving']} with the ball moving, {g['unseen']} with the ball never seen")
         if "graded" in s:
             g = s["graded"]
             print(f"  graded frames: {100 * g['dead_share']:.1f}% dead ({g['dead_frames']} / {g['frames']})")
-    if check:
-        print(f"\npublic GT ({check['frames']} labelled frames, {check['gt_dead']} D): "
-              f"precision {check['precision']}  recall {check['recall']}  IoU {check['iou']}")
+    if checks["dead"]:
+        print(f"\npublic GT ({checks['dead']['frames']} labelled frames, {checks['dead']['gt_dead']} D):")
+        for name, k in (("baseline", "baseline"), ("full method", "dead")):
+            c = checks[k]
+            print(f"  {name:<12s} precision {c['precision']}  recall {c['recall']}  IoU {c['iou']}")
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, "w") as fh:

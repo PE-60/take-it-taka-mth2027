@@ -14,7 +14,7 @@
   --good:#5adc5a; --warn:#f5d73c; --bad:#f03c3c;
   --ring:#ffe600; --kick:#ffc800; --jump:#c850ff; --churn:#ff8cc8; --lost:#f03c3c; --bolt:#e650e6; --air:#78dcff;
   --throw:#3cc8ff; --corner:#ffc83c; --goalkick:#ff78c8; --freekick:#5adc5a; --kickoff:#ffffff;
-  --dbview:#ff9f40; --dbball:#c88cff;
+  --dbview:#ff9f40; --dbball:#c88cff; --dbstill:#5fd3a0; --dbbase:#8a8f96;
   font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; font-size:13px; line-height:1.35;
   font-variant-numeric:tabular-nums; color:var(--fg); background:var(--bg);
 }
@@ -290,7 +290,11 @@ class EventIndex {
     const tl = doc && doc.timelines && doc.timelines[source]; if (!tl) return false;
     const n = this.ds.n, start = this.ds.start;
     const mask = intervals => { const m = new Uint8Array(n); for (const [a, b] of intervals || []) { const r0 = Math.max(0, a - start), r1 = Math.min(n - 1, b - start); if (r1 >= r0) m.fill(1, r0, r1 + 1); } return m; };
-    this.dead = { doc, mask: mask(tl.dead_ball), noView: mask(tl.terms && tl.terms.no_view), ballLost: mask(tl.terms && tl.terms.ball_lost), covered: mask(tl.covered) };
+    const T = tl.terms || {};
+    this.dead = { doc, mask: mask(tl.dead_ball), base: mask(T.baseline || tl.dead_ball), noView: mask(T.no_view), ballLost: mask(T.ball_lost),
+      kept: mask(T.ball_lost_kept || T.ball_lost), noCp: mask(T.no_counterpart), still: mask(T.still_gap), covered: mask(tl.covered) };
+    // why frame r is dead: the terms that put it there
+    this.dead.why = r => { const D = this.dead; return D.mask[r] ? [D.noView[r] && 'no view (B)', D.kept[r] && 'ball lost T∩B', D.noCp[r] && 'no counterpart', D.still[r] && 'ball still'].filter(Boolean) : []; };
     this.deadStarts = []; for (let r = 0; r < n; r++) if (this.dead.mask[r] && (r === 0 || !this.dead.mask[r - 1])) this.deadStarts.push(r);
     return true;
   }
@@ -672,7 +676,7 @@ const ROW_PRESETS = {
   'events': ['GT', 'RESTART', 'KICK', 'AR FLAGS', 'ANN EVENTS', 'BOOKMARK'],
   'data quality': ['GT', 'BALL LOST', 'BALL JUMP', 'PLAYER JUMP', 'DROPOUT <0.5 s', 'VANISH/APPEAR', 'COUNT ≠ 22', '› BOLT', 'HOMOGRAPHY', 'ANN DATA'],
   'annotation': ['GT', 'SEGMENT', 'MINE', 'ANN EVENTS', 'ANN DATA', 'SEGMENT B', 'ANN B', 'BOOKMARK'],
-  'dead ball': ['GT', 'DEAD BALL', 'NO VIEW (HOM ∅ ∩ ≠22)', 'BALL LOST T∩B', 'NO COUNTERPART', 'RESTART', 'BALL LOST', 'COUNT ≠ 22', 'HOMOGRAPHY'],
+  'dead ball': ['GT', 'DEAD BALL', 'DEAD (BASELINE)', 'NO VIEW (HOM ∅ ∩ ≠22)', 'BALL LOST T∩B', 'NO COUNTERPART', 'STILL-BALL GAP', 'RESTART', 'BALL LOST', 'COUNT ≠ 22', 'HOMOGRAPHY'],
   'minimal': ['GT', 'L&H', 'RESTART', 'BALL LOST'],
 };
 
@@ -1020,7 +1024,7 @@ function candidateList(t) {
     restart: r => { const f = E.flags.find(x => x.r === r); return f ? f.name : 'GT dead → alive'; }, kick: r => `ball ${ds.ball(r) ? ds.ball(r).sf.toFixed(0) : '?'} m/s`,
     referee: r => { const dets = E.refereeByFrame.get(r) || []; return dets.map(d => `${d.official_id || 'AR'} ${d.signal}`).join(' · ') || 'flag'; },
     lost: r => { let e = r; while (e < ds.n && !ds.ball(e)) e++; return `${((e - r) / ds.fps).toFixed(1)} s`; },
-    dead: r => { const D = E.dead; let e = r, v = 0, bl = 0; while (e < ds.n && D.mask[e]) { v += D.noView[e]; bl += D.ballLost[e]; e++; } return `${((e - r) / ds.fps).toFixed(1)} s · ${v && bl ? 'both terms' : v ? 'no view (B)' : 'ball lost T∩B'}`; },
+    dead: r => { const D = E.dead, why = new Set(); let e = r; while (e < ds.n && D.mask[e]) { for (const w of D.why(e)) why.add(w); e++; } return `${((e - r) / ds.fps).toFixed(1)} s · ${[...why].join(' + ')}`; },
     jump: r => { const b = ds.meta.events.bjump.find(e => e[0] === r); if (b) return `ball ${b[1].toFixed(1)} m`; const p = ds.meta.events.pjump.find(e => e[0] === r); return p ? `#${ds.numOf(p[1])} ${p[2].toFixed(1)} m` : ''; },
     churn: r => [...ds.meta.events.vanish.filter(e => e[0] === r).map(e => 'lost #' + ds.numOf(e[1])), ...ds.meta.events.appear.filter(e => e[0] === r).map(e => 'new #' + ds.numOf(e[1]))].join(', '),
     ambig: r => `${ringCount(r)} within ${tp} m`,
@@ -1113,7 +1117,8 @@ function buildLegend() {
   const el = $('#legend'); el.innerHTML = '';
   const items = [['tri_up', col('good'), 'GT dead → alive', 'RESTART'], ...Object.entries(RESTART_GLYPHS).map(([n, [g, c]]) => [g, c, n.toLowerCase(), 'RESTART']), ['pin', '#fff', 'bookmark', 'BOOKMARK'],
     [null, col('kick'), 'kick', 'KICK'], [null, col('lost'), 'ball lost', 'BALL LOST'], [null, col('jump'), 'teleport', 'PLAYER JUMP'], [null, col('churn'), 'vanish / appear', 'VANISH/APPEAR'], [null, col('bolt'), `› Bolt ${ds.meta.bolt} m/s`, '› BOLT'], [null, TEAM.H, 'Barcelona', 'GT'], [null, TEAM.A, 'Athletic', 'GT'], [null, TEAM.D, 'dead ball', 'GT']];
-  if (E.dead) items.push([null, col('dbview'), 'no view: broadcast hom ∅ ∩ ≠22', 'NO VIEW (HOM ∅ ∩ ≠22)'], [null, col('dbball'), 'ball lost T∩B', 'BALL LOST T∩B']);
+  if (E.dead) items.push([null, col('dbview'), 'no view: broadcast hom ∅ ∩ ≠22', 'NO VIEW (HOM ∅ ∩ ≠22)'], [null, col('dbball'), 'ball lost T∩B', 'BALL LOST T∩B'],
+    [null, col('dbstill'), 'gap with the ball still', 'STILL-BALL GAP'], [null, col('dbbase'), 'dead ball before steps 1, 2', 'DEAD (BASELINE)']);
   for (const [k, c, t, row] of items) { if (row && !rowVisible(row)) continue; const s = document.createElement('span'); const cv = document.createElement('canvas'); cv.width = cv.height = 24; const g = cv.getContext('2d'); g.scale(2, 2); if (k) glyph(g, k, 6, 6, 4.5, c); else { g.fillStyle = c; g.fillRect(2, 3, 8, 6); } s.appendChild(cv); s.append(t); el.appendChild(s); }
 }
 function setupHelp() {
@@ -1301,7 +1306,7 @@ function updateInfo() {
   const k = P.lhPid[r]; if (k >= 0 && b) { const hp = ds.slot(r, k); let press = 0; for (const p of PL) if (ds.sideOf(p.k) !== ds.sideOf(k) && ds.metres(hp, p) <= 3) press++; row('L&H holder', `#${ds.numOf(k)} · pressure ${press} opp &lt; 3 m`, TEAM[ds.sideOf(k)]); }
   let fast = null; for (const p of PL) if (Number.isFinite(p.sd) && (!fast || p.sd > fast.sd)) fast = p; if (fast) row('fastest', `#${ds.numOf(fast.k)} ${fast.sd.toFixed(1)} m/s${fast.sd > ds.meta.bolt ? ' › Bolt' : ''}`, fast.sd > ds.meta.bolt ? col('bolt') : null);
   if (ds.meta.hom_err) { const e = ds.meta.hom_err[r]; row('homography err', e < 0 ? 'none' : e.toFixed(2), e < 0 || e > 3 ? col('bad') : e > 1 ? col('warn') : col('good')); }
-  if (E.dead) { const D = E.dead; row('dead ball (sync)', !D.covered[r] && !D.mask[r] ? 'no counterpart' : D.mask[r] ? [D.noView[r] && 'no view (B)', D.ballLost[r] && 'ball lost T∩B'].filter(Boolean).join(' + ') : 'alive', D.mask[r] ? TEAM.D : null); }
+  if (E.dead) { const D = E.dead; row('dead ball (sync)', D.mask[r] ? D.why(r).join(' + ') : !D.covered[r] ? 'alive · no counterpart' : 'alive', D.mask[r] ? TEAM.D : null); }
   const hd = ds.attackDir(f); if (hd) row('attack', `BAR ${hd > 0 ? '→' : '←'} · ATH ${hd > 0 ? '←' : '→'}`);
   for (const e of ds.meta.tags.filter(e => e.a <= f && f < e.b)) row(e.restart ? 'restart' : 'tag', e.restart ? `${e.restart[0]} · ${e.team || '-'}` : `${e.code} · ${e.team || '-'}`, e.restart ? rgb(e.restart[1]) : TEAM[e.side] || null);
   const seg = store.segmentAt(r); if (seg.state !== 'clear') row('my reading', `${seg.team || '-'} · ${seg.state}`, TEAM[store.derivedLabel(r)]);
@@ -1324,8 +1329,9 @@ function buildRows() {
   grp('possession', pr);
   if (E.dead) {
     const D = E.dead;
-    grp('dead ball (sync)', [mask('DEAD BALL', r => D.mask[r], TEAM.D), mask('NO VIEW (HOM ∅ ∩ ≠22)', r => D.noView[r], col('dbview')),
-      mask('BALL LOST T∩B', r => D.ballLost[r], col('dbball')), mask('NO COUNTERPART', r => !D.covered[r], '#5f656d')]);
+    grp('dead ball (sync)', [mask('DEAD BALL', r => D.mask[r], TEAM.D), mask('DEAD (BASELINE)', r => D.base[r], col('dbbase')),
+      mask('NO VIEW (HOM ∅ ∩ ≠22)', r => D.noView[r], col('dbview')), mask('BALL LOST T∩B', r => D.ballLost[r], col('dbball')),
+      mask('NO COUNTERPART', r => !D.covered[r], '#5f656d'), mask('STILL-BALL GAP', r => D.still[r], col('dbstill'))]);
   }
   const ev = [{ name: 'RESTART', kind: 'restart' }, mask('KICK', r => E.kick.has(r), col('kick'))];
   if (E.refereeFrames && E.refereeFrames.length) {

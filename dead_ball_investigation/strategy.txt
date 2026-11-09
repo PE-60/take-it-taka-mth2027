@@ -65,9 +65,47 @@ Missing homography means no matrix at all. A high reprojection error doesn't cou
 Frames without a counterpart (cut by the sync, or outside the other video) count as "not missing" for the other video. So a frame is never dead just because the other video has nothing there. --no-counterpart-missing flips this.
 No minimum interval length. Short flickers in ball tracking will create short intervals.
 
-Fine-tuning of the intervals - for the end of the interval look where the ball has a big acceleration, i.e. it's kicked
+Fine-tuning of the intervals
+For the formula for dead ball intervals, we want better info about the missing ball intervals:
 
-For the formula for dead ball intervals, we want better info about the missing ball intervals
-Is the ball missing because it's in play and there is bad tracking, or is it missing because it went out of the field!!!
-Missing but in play: in this interval the velocity of the ball is not enough for it to exit (straight line interpolation) and players are moving in the direction of the ball before it went missing
 
+    - for the end of the interval look where the ball has a big acceleration, i.e. it's kicked
+    - check audio signals from referee
+    - Is the ball missing because it's in play and there is bad tracking, or is it missing because it went out of the field!!!
+        Missing but in play: in this interval the velocity of the ball is not enough for it to exit (straight line interpolation) and players are moving in the direction of the ball before it went missing
+        Missing out of play: ball was near pitch borders (check homography) before it went missing
+
+    Missing homography means no matrix at all. A high reprojection error doesn't count, even though the viewer's HOMOGRAPHY row colours errors above 3 red too.
+    Frames without a counterpart (cut by the sync, or outside the other video) count as "not missing" for the other video. So a frame is never dead just because the other video has nothing there. --no-counterpart-missing flips this.
+    No minimum interval length. Short flickers in ball tracking will create short intervals.
+
+
+For the L&H algo: 
+ - penalize changes of possesion
+ - make the possesion radius around the ball dynamic based on how far away are the other players from the ball
+ - look at the derivative (transitions) of the ball possesion - highly clustered changes should be dropped, since it's unlikely to have many transitions in short intervals
+ - CHECK HOW ACCELERATION of the ball cnahges possesion behaviour (frame 14197 of tactical video, ball is pasing by the player and there should NOT BE change of possesion)!
+
+ Wrong ball position indicator: The 3-4 closest players to the ball don't go in the direction of the ball
+
+
+
+TODO: 
+    Finalize dead ball:
+        Make the additions to the base-line deadball formula on the synchronized videos to be executed in the following order:
+        Count no counterpart of broadcast video as deadball too (i.e.to catch beginning, halftime, end in tactical video)
+        Between two dead ball intervals, if the ball does not move at least 1-2 meters for the whole gap between the d-ball intervals, connect the two deadball intervals (i.e. fill the gap as dead ball too)
+
+        Add info from smart tags!!!
+        Check when ball is outside of the field using tactical 
+        For small gaps (but maybe also for all kinds of gaps) between d-ball intervals, check if the structure of the tracked objects which are moving in the two videos is relatively the same. (This could potentially remove gaps, where the broadcast shows a replay while on the tactical video, i.e. on the pitch, nothing is happening) 
+
+    Understand how spellF1 score is calculated
+    Mark situations where the two closest players to the ball are roughly the same distance to the ball, the players are from different teams, the players are not moving towards the ball - this could possibly mark, when the ball's homography is inacurate during active play
+
+    When assessing short possesion intervals, check at the begining and end of the intervals, the ball has some acceleration, depicting a kick - if not, do not count it as a change of possesion, because it may be that the ball is in the air and its projection passes near an opposing team's player (could also happen on the ground, if the ball passes near a player and they don't catch it)   
+
+
+
+Review:
+tac fr 161866, 114780

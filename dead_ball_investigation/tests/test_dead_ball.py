@@ -15,18 +15,20 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 
 import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from dead_ball_investigation.dead_ball import (SyncedMatch, annotate, annotate_dead_ball, dead_ball_mask,
-                                               dead_ball_terms, intervals_to_mask, mask_to_intervals,
-                                               runs_overlapping, to_document)
+from dead_ball_investigation.dead_ball import (Params, SyncedMatch, annotate, annotate_dead_ball, ball_travel,
+                                               dead_ball_mask, dead_ball_terms, intervals_to_mask,
+                                               mask_to_intervals, runs_overlapping, to_document)
 from dead_ball_investigation.signals import SourceSignals, homography_missing, load_from_export
 from dead_ball_investigation.sync import SyncMap
 
 DUAL_HTML = os.path.join(os.path.dirname(__file__), "..", "..", "match_viewer", "match_dual.html")
+BASELINE = Params(counterpart_step=False, still_step=False)
 
 
 def signals(source, n, start=0, **set_true):
@@ -138,32 +140,44 @@ class TestSyncedMatch(unittest.TestCase):
                                                        {"a": 45, "b": 65, "code": "X", "type": None, "team": None}])
 
     def test_tactical_timeline(self):
-        r = annotate(self.match, "tactical")
+        r = annotate(self.match, "tactical", BASELINE)
         self.assertEqual(r.intervals("no_view"), [[3, 4], [71, 71]])
         self.assertEqual(r.intervals("ball_lost"), [[5, 6], [20, 20]])
         self.assertEqual(r.intervals("ball_lost_kept"), [])    # T 5, 6 touch no view at T 4 but do not overlap it
         self.assertEqual(r.intervals("dead"), [[3, 4], [71, 71]])
         self.assertEqual(r.intervals("covered"), [[0, 39], [60, 99]])
         self.assertFalse(r.dead[45])                           # tactical ball missing, no broadcast counterpart
-        self.assertEqual(annotate(self.match, "tactical", max_gap=1).intervals("dead"), [[3, 6], [71, 71]])
+        self.assertEqual(annotate(self.match, "tactical", replace(BASELINE, max_gap=1)).intervals("dead"),
+                         [[3, 6], [71, 71]])
 
-    def test_no_counterpart_policy(self):
-        r = annotate(self.match, "tactical", no_counterpart=True)
+    def test_unmapped_signals_policy(self):
+        r = annotate(self.match, "tactical", replace(BASELINE, unmapped_signals_missing=True))
         self.assertTrue(r.dead[40:60].all())                   # unmapped frames: B hom ∅ and count off assumed
         self.assertEqual(r.intervals("ball_lost"), [[5, 6], [20, 20], [45, 45]])
         self.assertEqual(r.intervals("ball_lost_kept"), [[45, 45]])  # inside the assumed no view
 
+    def test_step1_no_counterpart_is_dead(self):
+        res = annotate_dead_ball(self.match, replace(BASELINE, counterpart_step=True))
+        t, b = res["tactical"], res["broadcast"]
+        self.assertEqual(t.intervals("no_counterpart"), [[40, 59]])          # the cut between the anchors
+        self.assertEqual(t.intervals("dead"), [[3, 4], [40, 59], [71, 71]])
+        self.assertEqual(t.intervals("baseline"), [[3, 4], [71, 71]])
+        self.assertEqual(b.intervals("no_counterpart"), [[0, 9]])           # B 0..9 come before tactical frame 0
+        self.assertEqual(b.intervals("dead"), [[0, 9], [13, 14], [61, 61]])
+
     def test_broadcast_timeline_agrees(self):
-        for gap in (0, 1):
-            res = annotate_dead_ball(self.match, max_gap=gap)
+        for params in (BASELINE, replace(BASELINE, max_gap=1), Params()):
+            res = annotate_dead_ball(self.match, params)
             t, b = res["tactical"], res["broadcast"]
             for bf in range(90):
                 tf = self.match.sync.map(bf, "broadcast")
                 if tf >= 0:
-                    self.assertEqual(bool(b.dead[bf]), bool(t.dead[tf]), f"gap {gap}: B {bf} / T {tf}")
+                    self.assertEqual(bool(b.dead[bf]), bool(t.dead[tf]), f"{params}: B {bf} / T {tf}")
             self.assertTrue(b.no_view[0] and b.no_view[1])     # broadcast-only term holds without a counterpart
-        self.assertEqual(annotate(self.match, "broadcast").intervals("dead"), [[0, 1], [13, 14], [61, 61]])
-        self.assertEqual(b.intervals("dead"), [[0, 1], [13, 16], [61, 61]])
+            # the baseline evaluated on the broadcast's own signals agrees with the tactical one
+            for bf in range(10, 90):
+                self.assertEqual(bool(b.baseline[bf]), bool(t.baseline[self.match.sync.map(bf, "broadcast")]))
+        self.assertEqual(annotate(self.match, "broadcast", BASELINE).intervals("dead"), [[0, 1], [13, 14], [61, 61]])
 
     def test_tags_and_document(self):
         tags = self.match.synced_tags()
@@ -172,10 +186,14 @@ class TestSyncedMatch(unittest.TestCase):
         doc = to_document(self.match, annotate_dead_ball(self.match), "sync.json", graded=[[0, 49]])
         doc = json.loads(json.dumps(doc))
         tl = doc["timelines"]["tactical"]
-        self.assertEqual(tl["dead_ball"], [[3, 4], [71, 71]])
+        self.assertEqual(tl["dead_ball"], [[3, 4], [40, 59], [71, 71]])
+        self.assertEqual(tl["terms"]["baseline"], [[3, 4], [71, 71]])
         self.assertEqual(tl["terms"]["ball_lost"], [[5, 6], [20, 20]])
         self.assertEqual(tl["terms"]["ball_lost_kept"], [])
-        self.assertEqual(tl["stats"]["graded"]["dead_frames"], 2)
+        self.assertEqual(tl["terms"]["no_counterpart"], [[40, 59]])
+        self.assertEqual(tl["stats"]["graded"]["dead_frames"], 12)
+        self.assertEqual(tl["stats"]["still_gaps"]["unseen"], 2)   # the fixture has no ball positions
+        self.assertEqual(doc["params"], Params().to_json())
         self.assertEqual(doc["timelines"]["broadcast"]["end"], 89)
         self.assertEqual(doc["smart_tags"][0]["broadcast"], [12, 18])
 
@@ -184,12 +202,55 @@ class TestSyncedMatch(unittest.TestCase):
         tac = signals("tactical", 20, start=10, ball=[12])
         br = signals("broadcast", 90, ball=[22])
         br_hom = signals("broadcast", 90, ball=[22], hom=[21, 22], count=[22])
-        r = annotate(SyncedMatch(tac, br, self.match.sync), "tactical")
+        frames = {"tactical": 100, "broadcast": 90}
+        r = annotate(SyncedMatch(tac, br, self.match.sync, video_frames=frames), "tactical")
         self.assertEqual(r.start, 10)
         self.assertEqual(r.intervals("ball_lost"), [[12, 12]])
         self.assertEqual(r.intervals("dead"), [])               # ball lost without a no view next to it
-        r = annotate(SyncedMatch(tac, br_hom, self.match.sync), "tactical")
+        r = annotate(SyncedMatch(tac, br_hom, self.match.sync, video_frames=frames), "tactical")
         self.assertEqual(r.intervals("dead"), [[12, 12]])
+        # counterpart in the tactical video but not loaded: not a step 1 frame
+        b = annotate(SyncedMatch(tac, br, self.match.sync, video_frames=frames), "broadcast")
+        self.assertEqual(b.intervals("no_counterpart"), [[0, 9]])
+        self.assertEqual(b.intervals("dead"), [[0, 9]])
+
+
+class TestStillGaps(unittest.TestCase):
+    """Step 2 on one timeline: no-view intervals T/B 10-19, 30-39, 50-59, 70-79, 100-109 (sync offset 0)."""
+
+    def setUp(self):
+        n, still = 120, (50.0, 30.0)
+        t_xy, b_xy = np.tile(still, (n, 1)), np.tile(still, (n, 1))
+        t_xy[20:30] += np.c_[np.linspace(0, 0.4, 10), np.linspace(0, -0.4, 10)]   # A: jitters in place
+        b_xy[20:30, 0] = np.linspace(40, 60, 10)                                 #    the broadcast ball moves
+        t_xy[40:50, 0] = np.linspace(50, 53, 10)                                 # B: rolls 3 m
+        t_xy[60:70] = np.nan                                                     # C: only the broadcast sees it
+        t_xy[80:100], b_xy[80:100] = np.nan, np.nan                              # D: nobody sees it
+        hom = [f for a in (10, 30, 50, 70, 100) for f in range(a, a + 10)]
+        tac = SourceSignals("tactical", 0, ~np.isfinite(t_xy[:, 0]), np.full(n, 22), np.zeros(n, bool), t_xy)
+        br = signals("broadcast", n, hom=hom, count=hom, ball=list(range(80, 100)))
+        br.ball_xy = b_xy
+        self.match = SyncedMatch(tac, br, SyncMap([{"tactical": 0, "broadcast": 0}]))
+
+    def test_gaps(self):
+        res = annotate_dead_ball(self.match)
+        t, b = res["tactical"], res["broadcast"]
+        self.assertEqual(t.intervals("still_gap"), [[20, 29], [60, 69]])
+        self.assertEqual(t.intervals("dead"), [[10, 39], [50, 79], [100, 109]])
+        self.assertEqual(t.gaps, {"gaps": 4, "filled": 2, "filled_frames": 20, "moving": 1, "unseen": 1})
+        self.assertEqual(b.intervals("dead"), t.intervals("dead"))
+        self.assertEqual(b.intervals("still_gap"), [[20, 29], [60, 69]])
+        self.assertFalse(t.dead[:10].any() or t.dead[110:].any())   # no gap before the first or after the last
+
+    def test_radius_and_switches(self):
+        self.assertEqual(annotate(self.match, "tactical", Params(still_radius_m=3.5)).intervals("dead"),
+                         [[10, 79], [100, 109]])
+        self.assertEqual(annotate(self.match, "tactical", Params(still_step=False)).intervals("dead"),
+                         [[10, 19], [30, 39], [50, 59], [70, 79], [100, 109]])
+
+    def test_ball_travel(self):
+        self.assertIsNone(ball_travel(np.full((4, 2), np.nan)))
+        self.assertAlmostEqual(ball_travel([[0, 0], [np.nan, np.nan], [3, 4], [1, 0]]), 5.0)
 
 
 class TestLoaders(unittest.TestCase):

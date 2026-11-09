@@ -3,14 +3,35 @@
 ```
 no view   = broadcast homography missing  ∩  broadcast player count ≠ 22
 ball lost = tactical ball missing         ∩  broadcast ball missing
-dead ball = no view  ∪  (the ball-lost intervals that overlap a no-view interval)
+baseline  = no view  ∪  (the ball-lost intervals that overlap a no-view interval)
+
+then, in this order:
+1. no counterpart   frames without a counterpart in the other video are dead
+2. still ball       a gap between two dead intervals is dead when the ball stays within
+                    1.5 m of where it is first seen in the gap, for the whole gap
 ```
 
-A ball-lost interval joins the dead ball whole when it shares at least one frame with a no-view
-interval; a ball-lost interval on its own is not dead ball. `run.py --max-gap N` also accepts
-ball-lost intervals that end or start within N frames of a no-view interval. `dead_ball.json` keeps
-every ball-lost interval in `terms.ball_lost` and the accepted ones in `terms.ball_lost_kept`, so the
-viewers' BALL LOST T∩B row shows all of them and DEAD BALL only the accepted ones.
+**Baseline.** A ball-lost interval joins the dead ball whole when it shares at least one frame with
+a no-view interval; a ball-lost interval on its own is not dead ball. `run.py --max-gap N` also
+accepts ball-lost intervals that end or start within N frames of a no-view interval.
+
+**Step 1** catches what the broadcast does not show: on the tactical timeline, before the broadcast
+starts, halftime, and after it ends. "No counterpart" means the sync map gives none, or gives a
+frame off the end of the other video; a counterpart that exists but is outside a partial export
+does not count.
+
+**Step 2** runs on the dead intervals after step 1 (so halftime and the match ends count as
+neighbours) and only between two of them, never before the first or after the last. The ball
+position is the tactical ATD ball, in metres; the broadcast ball is used only for a gap in which
+the tactical one is never seen. A gap in which neither sees the ball is left alone: there is no
+evidence it was still. `--still-radius M` changes the 1.5 m.
+
+The full method runs on the tactical timeline; broadcast frames with a tactical counterpart take its
+result, so both timelines agree. `dead_ball.json` keeps every stage as a term: `no_view`,
+`ball_lost` (all of them), `ball_lost_kept`, `baseline`, `no_counterpart` (step 1) and `still_gap`
+(step 2). Leave out a step with `--skip-counterpart-step` or `--skip-still-step`. The CLI prints
+precision, recall and IoU against the public ground truth for the baseline and for the full method,
+and the step 2 gap counts (filled, ball moving, ball never seen).
 
 The two recordings are put on one timeline with the kick-off anchors from
 `match_viewer/synchronize_videos.py` (`match_viewer/export/sync.json`). The mapping rule is the
@@ -25,13 +46,13 @@ The three signals are gathered the way `match_viewer.py` gathers them, through i
 | ball missing | `~isfinite(load_atd(...)["ball"][:, 0])` | BALL LOST |
 | player count ≠ 22 | `load_atd(...)["count"] != 22` (track slots with a position) | COUNT ≠ 22 |
 | homography missing | no CSV row, `valid == 0`, or a non-finite matrix | HOMOGRAPHY red, "homography none" |
+| ball position (step 2) | `load_atd(...)["ball"][:, :2]` × pitch size (metres) | ball on the minimap |
 
-The formula is evaluated on both timelines. On the tactical timeline the broadcast signals are pulled
-across through the sync. On the broadcast timeline the tactical ball is pulled across. A frame with
-no counterpart on the other recording takes "not missing" for that recording's signals, so missing
-data is never dead-ball evidence on its own. `--no-counterpart-missing` flips this. The broadcast-only
-"no view" term still applies to broadcast frames that have no tactical counterpart (pre-match,
-halftime studio).
+The baseline terms are evaluated on both timelines. On the tactical timeline the broadcast signals
+are pulled across through the sync. On the broadcast timeline the tactical ball is pulled across. A
+frame with no counterpart on the other recording takes "not missing" for that recording's signals,
+so for the baseline missing data is never dead-ball evidence on its own (`--no-counterpart-missing`
+flips this); step 1 is what makes a missing counterpart dead.
 
 ## Run
 
@@ -80,10 +101,12 @@ The CLI also prints precision and recall of the derived dead ball against `D` in
 
 `match_viewer.html` loads `export/dead_ball.json` on start. With it, you get:
 
-- a **dead ball (sync)** row group: `DEAD BALL` (the union, in the GT dead-ball grey),
-  `NO VIEW (HOM ∅ ∩ ≠22)`, `BALL LOST T∩B` and `NO COUNTERPART`;
+- a **dead ball (sync)** row group: `DEAD BALL` (the full method, in the GT dead-ball grey),
+  `DEAD (BASELINE)`, `NO VIEW (HOM ∅ ∩ ≠22)`, `BALL LOST T∩B` (every ball-lost interval),
+  `NO COUNTERPART` (step 1) and `STILL-BALL GAP` (step 2);
 - a `DEAD BALL` overview strip, a "dead ball" row preset, "dead ball (derived)" in step events and
-  in the candidate queue (interval starts, labelled by which term fired), and a line in the frame info panel.
+  in the candidate queue (interval starts, labelled by the terms that make them), and a line in the
+  frame info panel saying why a frame is dead.
 
 The dual view (`match_dual.html`) shows the same rows for both panes, mapped through the live sync.
 If you change the anchors there, the readout says the dead-ball rows were computed with other
@@ -92,12 +115,14 @@ anchors. Download the new `sync.json` and rerun the CLI.
 ## Use from code
 
 ```python
-from dead_ball_investigation import SyncMap, SyncedMatch, annotate_dead_ball, load_source, load_tags
+from dead_ball_investigation import Params, SyncMap, SyncedMatch, annotate_dead_ball, load_source, load_tags
 
 match = SyncedMatch(load_source("tactical"), load_source("broadcast"), SyncMap.from_json(), load_tags())
-res = annotate_dead_ball(match)
+res = annotate_dead_ball(match)          # full method; Params(...) as a second argument changes it
 res["tactical"].intervals()              # [[a, b], ...] tactical frames
-res["tactical"].intervals("no_view")     # one term
+res["tactical"].intervals("still_gap")   # one term
+res["tactical"].gaps                     # step 2 counts
+annotate_dead_ball(match, Params(counterpart_step=False, still_step=False))   # baseline only
 match.timeline("tactical")               # every signal of both recordings on tactical frames
 ```
 
@@ -107,6 +132,7 @@ match.timeline("tactical")               # every signal of both recordings on ta
 python -m unittest dead_ball_investigation.tests.test_dead_ball
 ```
 
-All synthetic: the formula's truth table, the sync map (including parity with `match_dual.html`,
-run through `node` if it is installed), both timelines, the no-counterpart policy, and the
-`match_viewer` loaders on generated ATD and homography files.
+All synthetic: the baseline's truth table and overlap rule, both steps (halftime cut, still, moving
+and unseen gaps, the radius), the sync map (including parity with `match_dual.html`, run through
+`node` if it is installed), agreement of both timelines, partial exports, and the `match_viewer`
+loaders on generated ATD and homography files.
