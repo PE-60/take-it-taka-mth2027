@@ -113,13 +113,13 @@ const LS = {
 };
 const KEY = 'pv:dual:' + q.get('t') + '|' + q.get('b');
 const RG = 2, GG = 10, OVH = 14;
-const DEFAULT_ROWS = ['GT', 'PRED', 'NAIVE', 'L&H', 'DEAD BALL', 'RESTART', 'KICK', 'BALL LOST', 'BALL SPEED', 'COUNT ≠ 22', 'HOMOGRAPHY'];
+const DEFAULT_ROWS = ['GT', 'PRED', 'NAIVE', 'L&H', 'DEAD BALL', 'RESTART', 'KICK', 'BALL LOST', 'BALL OFF PITCH', 'BALL SPEED', 'COUNT ≠ 22', 'HOMOGRAPHY'];
 const DEFAULT_PAIRS = [['L&H', 'L&H'], ['GT', 'L&H']];
 const DEAD_ROWS = ['DEAD BALL', 'DEAD (BASELINE)', 'NO VIEW (HOM ∅ ∩ ≠22)', 'BALL LOST T∩B', 'NO COUNTERPART', 'STILL-BALL GAP'];
 const PRESETS = {
   possession: ['GT', 'PRED', 'NAIVE', 'L&H', 'SEGMENT', 'MINE', 'RESTART', 'KICK'],
   'dead ball': ['GT', ...DEAD_ROWS, 'RESTART', 'BALL LOST', 'COUNT ≠ 22', 'HOMOGRAPHY'],
-  'data quality': ['BALL LOST', 'BALL SPEED', 'BALL JUMP', 'PLAYER JUMP', 'DROPOUT <0.5 s', 'VANISH/APPEAR', 'COUNT ≠ 22', '› BOLT', 'HOMOGRAPHY'],
+  'data quality': ['BALL LOST', 'BALL OFF PITCH', 'BALL SPEED', 'BALL JUMP', 'PLAYER JUMP', 'DROPOUT <0.5 s', 'VANISH/APPEAR', 'COUNT ≠ 22', '› BOLT', 'HOMOGRAPHY'],
   minimal: ['GT', 'L&H', 'BALL LOST', 'HOMOGRAPHY'],
 };
 
@@ -369,6 +369,8 @@ function allNames() {
   for (const id of ['t', 'b']) { let g = ''; for (const r of panes[id].pv.ROWS) { if (r.grp) { g = r.grp; continue; } if (r.kind !== 'slot' && !out.has(r.name)) out.set(r.name, g); } }
   return out;
 }
+// rows that also get a T∪B lane: the frame counts on either side, mapped through the sync
+const UNION_ROWS = { 'BALL OFF PITCH': 'ballOff' };
 function lanes() {
   const out = [], names = allNames();
   const ds = pairs.map(pr => ({ pr, ra: rowOf(panes.t, pr[0]), rb: rowOf(panes.b, pr[1]) })).filter(x => x.ra && x.rb && x.ra.kind === 'label' && x.rb.kind === 'label');
@@ -377,6 +379,8 @@ function lanes() {
   for (const [name, grp] of names) {
     if (!selected.includes(name)) continue;
     if (grp !== g) { out.push({ grp }); g = grp; }
+    const ra = rowOf(panes.t, name), rb = rowOf(panes.b, name), key = UNION_ROWS[name];
+    if (key && ra && rb && panes.t.pv.E[key] && panes.b.pv.E[key]) out.push({ kind: 'union', name, key, color: ra.color });
     for (const id of ['t', 'b']) { const row = rowOf(panes[id], name); if (row) out.push({ kind: 'row', pane: id, row, name }); }
   }
   return out;
@@ -390,6 +394,29 @@ function drawRowLane(g, lane, y, W) {
     const x0 = Math.round(fx(a, W)), w = Math.round(fx(b + 1, W)) - x0; if (w < 1) continue;
     g.drawImage(p.pv.rowStrip(lane.row, a + pc.off - p.ds.start, b + pc.off - p.ds.start, w), 0, 0, w, 1, x0, y, w, RH);
   }
+}
+// frames of pane p's per-frame mask E[key] that are set within absolute frames lo..hi (prefix sums, cached)
+function countMask(p, key, lo, hi) {
+  lo = Math.max(lo, p.ds.start); hi = Math.min(hi, p.ds.end); if (hi < lo) return 0;
+  const cache = p.cum || (p.cum = {});
+  if (!cache[key]) { const m = p.pv.E[key], c = new Int32Array(m.length + 1); for (let i = 0; i < m.length; i++) c[i + 1] = c[i] + m[i]; cache[key] = c; }
+  const c = cache[key]; return c[hi - p.ds.start + 1] - c[lo - p.ds.start];
+}
+// per pixel: set on the tactical side only, the broadcast side only, or both; exact, not sampled
+function drawUnionLane(g, lane, y, W) {
+  const R = panes[ref], O = panes[other(ref)], per = (view[1] - view[0] + 1) / W;
+  const both = lane.color, only = { t: [143, 208, 255], b: [255, 196, 107] };
+  const c = document.createElement('canvas'); c.width = W; c.height = 1; const cg = c.getContext('2d'), img = cg.createImageData(W, 1), px = img.data;
+  for (let i = 0; i < W; i++) {
+    const a = view[0] + Math.floor(i * per), b = Math.max(a, view[0] + Math.floor((i + 1) * per) - 1);
+    const nR = countMask(R, lane.key, a, b); let nO = 0, covered = a >= R.ds.start && b <= R.ds.end;
+    for (const pc of sync.pieces(ref, a, b)) { nO += countMask(O, lane.key, pc.a + pc.off, pc.b + pc.off); covered = true; }
+    const n = { [ref]: nR, [other(ref)]: nO }, o = i * 4;
+    const col = n.t && n.b ? both : n.t ? only.t : n.b ? only.b : covered ? [34, 34, 34] : null;
+    if (!col) continue;
+    px[o] = col[0]; px[o + 1] = col[1]; px[o + 2] = col[2]; px[o + 3] = 255;
+  }
+  cg.putImageData(img, 0, 0); g.drawImage(c, 0, 0, W, 1, 0, y, W, RH);
 }
 const norm = v => (v && v !== 'X' && v !== '?') ? v : null;
 // per pixel: share of frames (both sides labelled) where the two label rows disagree
@@ -446,7 +473,8 @@ function redraw() {
     if (l.grp) { mk(l.grp, y + 1, 'grp'); y += GG; continue; }
     g.fillStyle = hatch; g.fillRect(0, y, W, RH);
     const ly = y + Math.max(0, (RH - 10) / 2);
-    if (l.kind === 'diff') { drawDiffLane(g, l, y, W); mk(`<span class="tagD">Δ</span> <span class="tagT">T</span> ${l.pr[0]} · <span class="tagB">B</span> ${l.pr[1]}` + (l.agree !== null ? ` <span style="color:var(--fg)">${(l.agree * 100).toFixed(0)}%</span>` : ''), ly, null, `T ${l.pr[0]} vs B ${l.pr[1]}: dark green = agree, magenta = share of frames that disagree, ${l.agree !== null ? (l.agree * 100).toFixed(1) + '% agreement in view' : 'no overlap in view'}`); }
+    if (l.kind === 'union') { drawUnionLane(g, l, y, W); mk(`<span class="tagT">T</span>∪<span class="tagB">B</span> ${l.name}`, ly, null, `${l.name} on either video, mapped through the sync: blue = tactical only, orange = broadcast only, the row colour = both`); }
+    else if (l.kind === 'diff') { drawDiffLane(g, l, y, W); mk(`<span class="tagD">Δ</span> <span class="tagT">T</span> ${l.pr[0]} · <span class="tagB">B</span> ${l.pr[1]}` + (l.agree !== null ? ` <span style="color:var(--fg)">${(l.agree * 100).toFixed(0)}%</span>` : ''), ly, null, `T ${l.pr[0]} vs B ${l.pr[1]}: dark green = agree, magenta = share of frames that disagree, ${l.agree !== null ? (l.agree * 100).toFixed(1) + '% agreement in view' : 'no overlap in view'}`); }
     else { drawRowLane(g, l, y, W); mk(`<span class="tag${l.pane.toUpperCase()}">${l.pane.toUpperCase()}</span> ${l.name}`, ly, null, `${NAME[l.pane]} · ${l.name}`); }
     y += RH + RG;
   }
@@ -564,8 +592,9 @@ async function boot() {
   if (panes.b.ds.fps !== fps) fail(`the two exports have different fps (${fps} vs ${panes.b.ds.fps}); frame mapping assumes they match`);
   wirePane(panes.t); wirePane(panes.b);
   selected = LS.get(KEY + ':rows', null) || DEFAULT_ROWS.slice(); pairs = LS.get(KEY + ':pairs', null) || DEFAULT_PAIRS.map(p => p.slice());
-  // a saved row choice predates the dead-ball rows: show the main one once, then leave the choice alone
-  if (rowOf(panes.t, 'DEAD BALL') && !LS.get(KEY + ':deadSeen', false)) { if (!selected.includes('DEAD BALL')) selected.push('DEAD BALL'); LS.set(KEY + ':deadSeen', true); LS.set(KEY + ':rows', selected); }
+  // a saved row choice predates these rows: show each once, then leave the choice alone
+  for (const [seen, name] of [['deadSeen', 'DEAD BALL'], ['offSeen', 'BALL OFF PITCH']])
+    if (rowOf(panes.t, name) && !LS.get(KEY + ':' + seen, false)) { if (!selected.includes(name)) selected.push(name); LS.set(KEY + ':' + seen, true); LS.set(KEY + ':rows', selected); }
   ref = LS.get(KEY + ':axis', 't'); $('#axis').value = ref; view = fullRange();
   loadRestarts(); pinsOn = LS.get(KEY + ':pins', true);
   const pinBtn = () => { const b = $('#bPins'); b.className = pinsOn && RESTARTS.length ? 'on' : ''; b.disabled = !RESTARTS.length; if (!RESTARTS.length) b.title = 'no SET PIECES smart tags in the tactical export'; };

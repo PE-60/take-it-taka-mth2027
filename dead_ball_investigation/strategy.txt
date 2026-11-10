@@ -96,7 +96,8 @@ For the L&H algo:
 TODO: 
     Finalize dead ball:
 
-        Check when ball is outside of the field using tactical (and broadcast maybe?) - this should fix missing throw ins.
+        Check when ball is outside of the field using tactical (and broadcast maybe? when tactical is missing) - this should fix missing throw ins.
+            For sure add a padding to the coords: don't count d-ball if cooords >= 1 + 0.002 and only for less than 1s
         For small gaps (but maybe also for all kinds of gaps) between d-ball intervals, check if the structure of the tracked objects which are moving in the two videos is relatively the same. (This could potentially remove gaps, where the broadcast shows a replay while on the tactical video, i.e. on the pitch, nothing is happening) 
 
     Understand how spellF1 score is calculated
@@ -107,5 +108,5 @@ TODO:
 
 
 Review:
-tac fr: 161866; 114780; gap to be removed - 142989;
+tac fr: 114780; gap to be removed - 142989; gap to be removed - 62217; use fact that structures do not match (broadcast replays) and ball is missing from tactical - 122724; tracks a bird instead of the ball - 10951
 mnogo smeshna homografiq: tac 137015, br 110095; 

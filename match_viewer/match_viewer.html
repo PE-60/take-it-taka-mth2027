@@ -14,7 +14,7 @@
   --good:#5adc5a; --warn:#f5d73c; --bad:#f03c3c;
   --ring:#ffe600; --kick:#ffc800; --jump:#c850ff; --churn:#ff8cc8; --lost:#f03c3c; --bolt:#e650e6; --air:#78dcff;
   --throw:#3cc8ff; --corner:#ffc83c; --goalkick:#ff78c8; --freekick:#5adc5a; --kickoff:#ffffff;
-  --dbview:#ff9f40; --dbball:#c88cff; --dbstill:#5fd3a0; --dbbase:#8a8f96;
+  --dbview:#ff9f40; --dbball:#c88cff; --dbstill:#5fd3a0; --dbbase:#8a8f96; --off:#2ee6d6;
   font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; font-size:13px; line-height:1.35;
   font-variant-numeric:tabular-nums; color:var(--fg); background:var(--bg);
 }
@@ -128,6 +128,7 @@ textarea{width:100%;background:var(--panel2);border:1px solid var(--line2);borde
       <option value="kick">kicks</option>
       <option value="referee">AR flag signals</option>
       <option value="lost">ball lost (stretch starts)</option>
+      <option value="off">ball off pitch, x or y ∉ [-0.002, 1.002] for &gt; 1 s (stretch starts)</option>
       <option value="jump">teleports (ball / player)</option>
       <option value="churn">vanish / appear</option>
       <option value="ambig">ambiguous ring (0 or ≥2 players within radius, GT alive)</option>
@@ -187,7 +188,7 @@ textarea{width:100%;background:var(--panel2);border:1px solid var(--line2);borde
     <select id="stepType">
       <option value="restart">restarts</option><option value="dead">dead ball (derived)</option><option value="gt_change">GT transitions</option><option value="kick">kicks</option>
       <option value="referee">AR flags</option>
-      <option value="lost">ball lost</option><option value="jump">teleports</option><option value="churn">vanish/appear</option><option value="cand">candidate queue</option>
+      <option value="lost">ball lost</option><option value="off">ball off pitch</option><option value="jump">teleports</option><option value="churn">vanish/appear</option><option value="cand">candidate queue</option>
     </select>
     <button id="bPrev">‹ prev</button><button id="bNext">next ›</button>
   </div>
@@ -245,6 +246,7 @@ class DataSet {
 // ===== events.js =====
 // Event lists worked out from the export: kicks, lost ball stretches, jumps and so on.
 // All frame indices are relative to the export.
+const OFF_LO = -0.002, OFF_HI = 1.002, OFF_MIN_S = 1;
 class EventIndex {
   constructor(ds) {
     this.ds = ds;
@@ -252,6 +254,15 @@ class EventIndex {
     this.kick = new Set(m.events.kick);
     this.lostStarts = []; let inLost = false;
     for (let r = 0; r < n; r++) { const b = ds.ball(r); if (!b && !inLost) this.lostStarts.push(r); inLost = !b; }
+    // ball tracked but off the pitch: x or y outside [OFF_LO, OFF_HI] on consecutive frames for more than OFF_MIN_S
+    this.ballOff = new Uint8Array(n); this.ballOffStarts = [];
+    const off = r => { const b = ds.ball(r); return !!b && !(b.x >= OFF_LO && b.x <= OFF_HI && b.y >= OFF_LO && b.y <= OFF_HI); };
+    for (let r = 0; r < n;) {
+      if (!off(r)) { r++; continue; }
+      let e = r; while (e < n && off(e)) e++;
+      if (e - r > OFF_MIN_S * ds.fps) { this.ballOff.fill(1, r, e); this.ballOffStarts.push(r); }
+      r = e;
+    }
     this.jumpFrames = [...new Set([...m.events.bjump.map(e => e[0]), ...m.events.pjump.map(e => e[0])])].sort((a, b) => a - b);
     this.churnFrames = [...new Set([...m.events.vanish.map(e => e[0]), ...m.events.appear.map(e => e[0])])].sort((a, b) => a - b);
     this.gtChanges = []; this.restartFrames = [];
@@ -304,6 +315,7 @@ class EventIndex {
       case 'lost': return this.lostStarts; case 'jump': return this.jumpFrames; case 'churn': return this.churnFrames;
       case 'referee': return this.refereeSignalFrames.length ? this.refereeSignalFrames : this.refereeFrames;
       case 'dead': return this.deadStarts || [];
+      case 'off': return this.ballOffStarts;
     }
     return [];
   }
@@ -1016,7 +1028,7 @@ function candidateList(t) {
     gt_vs_lh: () => ds.meta.gt ? segmentStarts(r => alive(r) && P.lh[r] && P.lh[r] !== gt(r)) : [],
     gt_vs_pred: () => (ds.meta.gt && ds.meta.pred) ? segmentStarts(r => gt(r) !== 'X' && ds.pred(r) !== gt(r)) : [],
     gt_change: () => E.gtChanges, restart: () => E.restartFrames, kick: () => E.list('kick'), referee: () => E.list('referee'),
-    lost: () => E.lostStarts, jump: () => E.jumpFrames, churn: () => E.churnFrames, dead: () => E.list('dead'),
+    lost: () => E.lostStarts, off: () => E.ballOffStarts, jump: () => E.jumpFrames, churn: () => E.churnFrames, dead: () => E.list('dead'),
     ambig: () => segmentStarts(r => alive(r) && ringCount(r) !== -1 && ringCount(r) !== 1),
   };
   const label = {
@@ -1024,6 +1036,7 @@ function candidateList(t) {
     restart: r => { const f = E.flags.find(x => x.r === r); return f ? f.name : 'GT dead → alive'; }, kick: r => `ball ${ds.ball(r) ? ds.ball(r).sf.toFixed(0) : '?'} m/s`,
     referee: r => { const dets = E.refereeByFrame.get(r) || []; return dets.map(d => `${d.official_id || 'AR'} ${d.signal}`).join(' · ') || 'flag'; },
     lost: r => { let e = r; while (e < ds.n && !ds.ball(e)) e++; return `${((e - r) / ds.fps).toFixed(1)} s`; },
+    off: r => { let e = r; while (e < ds.n && E.ballOff[e]) e++; const b = ds.ball(r); return `${((e - r) / ds.fps).toFixed(1)} s · x ${b.x.toFixed(2)} y ${b.y.toFixed(2)}`; },
     dead: r => { const D = E.dead, why = new Set(); let e = r; while (e < ds.n && D.mask[e]) { for (const w of D.why(e)) why.add(w); e++; } return `${((e - r) / ds.fps).toFixed(1)} s · ${[...why].join(' + ')}`; },
     jump: r => { const b = ds.meta.events.bjump.find(e => e[0] === r); if (b) return `ball ${b[1].toFixed(1)} m`; const p = ds.meta.events.pjump.find(e => e[0] === r); return p ? `#${ds.numOf(p[1])} ${p[2].toFixed(1)} m` : ''; },
     churn: r => [...ds.meta.events.vanish.filter(e => e[0] === r).map(e => 'lost #' + ds.numOf(e[1])), ...ds.meta.events.appear.filter(e => e[0] === r).map(e => 'new #' + ds.numOf(e[1]))].join(', '),
@@ -1116,7 +1129,7 @@ const RESTART_GLYPHS = { 'Throw-In': ['diamond', col('throw')], 'Corner': ['circ
 function buildLegend() {
   const el = $('#legend'); el.innerHTML = '';
   const items = [['tri_up', col('good'), 'GT dead → alive', 'RESTART'], ...Object.entries(RESTART_GLYPHS).map(([n, [g, c]]) => [g, c, n.toLowerCase(), 'RESTART']), ['pin', '#fff', 'bookmark', 'BOOKMARK'],
-    [null, col('kick'), 'kick', 'KICK'], [null, col('lost'), 'ball lost', 'BALL LOST'], [null, col('jump'), 'teleport', 'PLAYER JUMP'], [null, col('churn'), 'vanish / appear', 'VANISH/APPEAR'], [null, col('bolt'), `› Bolt ${ds.meta.bolt} m/s`, '› BOLT'], [null, TEAM.H, 'Barcelona', 'GT'], [null, TEAM.A, 'Athletic', 'GT'], [null, TEAM.D, 'dead ball', 'GT']];
+    [null, col('kick'), 'kick', 'KICK'], [null, col('lost'), 'ball lost', 'BALL LOST'], [null, col('off'), 'ball off pitch', 'BALL OFF PITCH'], [null, col('jump'), 'teleport', 'PLAYER JUMP'], [null, col('churn'), 'vanish / appear', 'VANISH/APPEAR'], [null, col('bolt'), `› Bolt ${ds.meta.bolt} m/s`, '› BOLT'], [null, TEAM.H, 'Barcelona', 'GT'], [null, TEAM.A, 'Athletic', 'GT'], [null, TEAM.D, 'dead ball', 'GT']];
   if (E.dead) items.push([null, col('dbview'), 'no view: broadcast hom ∅ ∩ ≠22', 'NO VIEW (HOM ∅ ∩ ≠22)'], [null, col('dbball'), 'ball lost T∩B', 'BALL LOST T∩B'],
     [null, col('dbstill'), 'gap with the ball still', 'STILL-BALL GAP'], [null, col('dbbase'), 'dead ball before steps 1, 2', 'DEAD (BASELINE)']);
   for (const [k, c, t, row] of items) { if (row && !rowVisible(row)) continue; const s = document.createElement('span'); const cv = document.createElement('canvas'); cv.width = cv.height = 24; const g = cv.getContext('2d'); g.scale(2, 2); if (k) glyph(g, k, 6, 6, 4.5, c); else { g.fillStyle = c; g.fillRect(2, 3, 8, 6); } s.appendChild(cv); s.append(t); el.appendChild(s); }
@@ -1354,7 +1367,7 @@ function buildRows() {
   if (store.layerB.points.length) ev.push({ name: 'ANN B', kind: 'ann', cat: null, layer: 'B' });
   ev.push(mask('BOOKMARK', r => store.bookmarks.some(b => b.f === r), '#ffffff'));
   grp('events', ev);
-  const dq = [mask('BALL LOST', r => !ds.ball(r), col('lost')), { name: 'BALL SPEED', kind: 'int', color: hex('#ffffff'), vmax: 30, bad: 40, get: r => { const b = ds.ball(r); return b ? b.sf : NaN; } }];
+  const dq = [mask('BALL LOST', r => !ds.ball(r), col('lost')), mask('BALL OFF PITCH', r => E.ballOff[r], col('off')), { name: 'BALL SPEED', kind: 'int', color: hex('#ffffff'), vmax: 30, bad: 40, get: r => { const b = ds.ball(r); return b ? b.sf : NaN; } }];
   if (ds.meta.has_z) dq.push({ name: 'BALL AIR', kind: 'int', color: hex(col('air')), vmax: 3, get: r => { const b = ds.ball(r); return b ? b.z : NaN; } });
   dq.push(mask('BALL JUMP', r => E.bjump.has(r), col('jump')), mask('PLAYER JUMP', r => E.pjump.has(r), col('jump')), mask('DROPOUT <0.5 s', r => ds.meta.dropout[r], '#777777'), mask('VANISH/APPEAR', r => E.churnFrames.includes(r), col('churn')));
   dq.push({ name: 'COUNT ≠ 22', kind: 'cat', get: r => { const c = ds.meta.count[r]; return c > 22 ? hex(col('churn')) : c < 16 ? hex(col('bad')) : c < 20 ? hex(col('warn')) : c < 22 ? [90, 90, 90] : null; } });
