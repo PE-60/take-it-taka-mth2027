@@ -88,16 +88,15 @@ For the L&H algo:
 
  Wrong ball position indicator: The 3-4 closest players to the ball don't go in the direction of the ball
 
-
-
+--Done
+    Make the additions to the base-line deadball formula on the synchronized videos to be executed in the following order:
+    Count no counterpart of broadcast video as deadball too (i.e.to catch beginning, halftime, end in tactical video)
+    Between two dead ball intervals, if the ball does not move at least 1-2 meters for the whole gap between the d-ball intervals, connect the two deadball intervals (i.e. fill the gap as dead ball too)
+    Add info from smart tags!!!
 TODO: 
     Finalize dead ball:
-        Make the additions to the base-line deadball formula on the synchronized videos to be executed in the following order:
-        Count no counterpart of broadcast video as deadball too (i.e.to catch beginning, halftime, end in tactical video)
-        Between two dead ball intervals, if the ball does not move at least 1-2 meters for the whole gap between the d-ball intervals, connect the two deadball intervals (i.e. fill the gap as dead ball too)
 
-        Add info from smart tags!!!
-        Check when ball is outside of the field using tactical 
+        Check when ball is outside of the field using tactical (and broadcast maybe?) - this should fix missing throw ins.
         For small gaps (but maybe also for all kinds of gaps) between d-ball intervals, check if the structure of the tracked objects which are moving in the two videos is relatively the same. (This could potentially remove gaps, where the broadcast shows a replay while on the tactical video, i.e. on the pitch, nothing is happening) 
 
     Understand how spellF1 score is calculated
@@ -108,4 +107,5 @@ TODO:
 
 
 Review:
-tac fr 161866, 114780
+tac fr: 161866; 114780; gap to be removed - 142989;
+mnogo smeshna homografiq: tac 137015, br 110095; 
