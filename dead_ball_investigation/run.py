@@ -2,8 +2,8 @@
 
     python dead_ball_investigation/run.py                 # from the raw data files (parses both ATDs)
     python dead_ball_investigation/run.py --from-exports  # from match_viewer exports (fast)
-    python dead_ball_investigation/run.py --from-exports --still-radius 2   # step 2 with a 2 m radius
-    python dead_ball_investigation/run.py --from-exports --skip-counterpart-step --skip-still-step  # baseline
+    python dead_ball_investigation/run.py --from-exports --still-radius 2   # step 3 with a 2 m radius
+    python dead_ball_investigation/run.py --from-exports --skip-counterpart-step --skip-off-pitch-step --skip-still-step  # baseline
 
 Every file in the package also runs as a file from any directory; `python -m dead_ball_investigation`
 works from the repo root.
@@ -27,8 +27,8 @@ if __package__ in (None, ""):  # run as a file: make the package importable
 from dead_ball_investigation.dead_ball import (FORMULA, STILL_RADIUS_M, TERMS, Params, SyncedMatch,  # noqa: E402
                                                annotate_dead_ball, to_document)
 from dead_ball_investigation.paths import EXPORT_DIR, REPO, require_repo  # noqa: E402
-from dead_ball_investigation.signals import (load_from_export, load_source, load_tags,  # noqa: E402
-                                             load_tags_from_export)
+from dead_ball_investigation.signals import (OFF_PITCH_MARGIN, OFF_PITCH_MIN_S, load_from_export,  # noqa: E402
+                                             load_source, load_tags, load_tags_from_export)
 from dead_ball_investigation.sync import DEFAULT_SYNC, SyncMap  # noqa: E402
 
 DEFAULT_OUT = os.path.join(EXPORT_DIR, "dead_ball.json")
@@ -106,16 +106,24 @@ def main(argv=None) -> int:
                          "within this many frames of one (default 0: it has to share a frame)")
     ap.add_argument("--skip-counterpart-step", action="store_true",
                     help="leave out step 1 (frames without a counterpart in the other video are dead)")
+    ap.add_argument("--skip-off-pitch-step", action="store_true",
+                    help="leave out step 2 (the tactical ball off the pitch, the broadcast's where the tactical "
+                         "ball is missing, is dead)")
+    ap.add_argument("--off-pitch-margin", type=float, default=OFF_PITCH_MARGIN,
+                    help=f"step 2: off the pitch is x or y outside [-margin, 1 + margin] (default {OFF_PITCH_MARGIN})")
+    ap.add_argument("--off-pitch-min-s", type=float, default=OFF_PITCH_MIN_S,
+                    help=f"step 2: only runs off the pitch longer than this many seconds count (default {OFF_PITCH_MIN_S})")
     ap.add_argument("--skip-still-step", action="store_true",
-                    help="leave out step 2 (fill gaps between dead intervals in which the ball stays still)")
+                    help="leave out step 3 (fill gaps between dead intervals in which the ball stays still)")
     ap.add_argument("--still-radius", type=float, default=STILL_RADIUS_M,
-                    help=f"step 2: the ball counts as still while it stays within this many metres of where it is "
+                    help=f"step 3: the ball counts as still while it stays within this many metres of where it is "
                          f"first seen in the gap (default {STILL_RADIUS_M})")
     args = ap.parse_args(argv)
     require_repo()
     params = Params(max_gap=args.max_gap, unmapped_signals_missing=args.no_counterpart_missing,
-                    counterpart_step=not args.skip_counterpart_step, still_step=not args.skip_still_step,
-                    still_radius_m=args.still_radius)
+                    counterpart_step=not args.skip_counterpart_step, off_pitch_step=not args.skip_off_pitch_step,
+                    off_pitch_margin=args.off_pitch_margin, off_pitch_min_s=args.off_pitch_min_s,
+                    still_step=not args.skip_still_step, still_radius_m=args.still_radius)
 
     match, inputs = build_match(args)
     print(f"\nsync: {len(match.sync.anchors)} anchor(s) from {args.sync}")
@@ -141,7 +149,7 @@ def main(argv=None) -> int:
             print(f"  {k:<14s} {s[k]['frames']:>7d} frames ({100 * s[k]['share']:5.1f}%) in {s[k]['intervals']} intervals")
         if "still_gaps" in s:
             g = s["still_gaps"]
-            print(f"  step 2: {g['gaps']} gaps, {g['filled']} filled ({g['filled_frames']} frames), "
+            print(f"  step 3: {g['gaps']} gaps, {g['filled']} filled ({g['filled_frames']} frames), "
                   f"{g['moving']} with the ball moving, {g['unseen']} with the ball never seen")
         if "graded" in s:
             g = s["graded"]

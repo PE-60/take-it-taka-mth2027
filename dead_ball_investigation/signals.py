@@ -4,6 +4,8 @@
     player count        atd["count"]  (track slots with a position)       timeline row COUNT != 22
     homography missing  no row, valid == 0, or a non-finite matrix        "homography  none"
     ball position       atd["ball"][:, :2] x pitch size, in metres (NaN where missing)
+    ball off pitch      ball x or y ∉ [-0.002, 1.002] (as a pitch fraction)  timeline row BALL OFF PITCH
+                        for more than 1 s in a row
 
 Two ways to get them:
   * load_source()       from the raw files, through match_viewer.load_atd / load_homography
@@ -26,6 +28,8 @@ if __package__ in (None, ""):  # run as a file: make the package importable
 from dead_ball_investigation.paths import REPO, VIEWER_DIR, require_repo  # noqa: E402,F401
 
 PLAYERS_ON_PITCH = 22
+OFF_PITCH_MARGIN = 0.002   # match_viewer.html OFF_LO / OFF_HI
+OFF_PITCH_MIN_S = 1.0      # match_viewer.html OFF_MIN_S
 _MV = None
 
 
@@ -50,6 +54,15 @@ def pitch_m():
     return tuple(GAMES[GAME]["pitch"])
 
 
+def runs_longer_than(mask, frames: float) -> np.ndarray:
+    """The runs of `mask` with more than `frames` frames."""
+    mask = np.asarray(mask, bool)
+    ids = np.cumsum(mask & ~np.concatenate([[False], mask[:-1]])) * mask
+    keep = np.bincount(ids) > frames
+    keep[0] = False
+    return keep[ids]
+
+
 @dataclass
 class SourceSignals:
     """Signals for video frames start .. start + len - 1 of one recording."""
@@ -59,8 +72,10 @@ class SourceSignals:
     count: np.ndarray             # int, tracked players per frame
     hom_missing: np.ndarray       # bool
     ball_xy: np.ndarray | None = None   # (n, 2) ball position in metres, NaN where missing
+    pitch: tuple | None = None          # metres; ball_xy / pitch is the ATD pitch fraction (default games.py)
 
     def __post_init__(self):
+        self.pitch = tuple(self.pitch or pitch_m())
         self.ball_missing = np.asarray(self.ball_missing, dtype=bool)
         self.count = np.asarray(self.count, dtype=np.int64)
         self.hom_missing = np.asarray(self.hom_missing, dtype=bool)
@@ -82,6 +97,15 @@ class SourceSignals:
     def count_off(self) -> np.ndarray:
         return self.count != PLAYERS_ON_PITCH
 
+    def ball_off(self, fps: float, margin: float = OFF_PITCH_MARGIN, min_s: float = OFF_PITCH_MIN_S) -> np.ndarray:
+        """Ball seen with x or y outside [-margin, 1 + margin] of the pitch, kept on runs longer than
+        min_s; the BALL OFF PITCH row of match_viewer.html."""
+        uv = self.ball_xy / np.asarray(self.pitch, dtype=np.float64)
+        seen = ~self.ball_missing & np.isfinite(uv).all(axis=1)
+        with np.errstate(invalid="ignore"):
+            inside = ((uv >= -margin) & (uv <= 1 + margin)).all(axis=1)
+        return runs_longer_than(seen & ~inside, min_s * fps)
+
 
 def homography_missing(hom, start: int, end: int) -> np.ndarray:
     """Per frame start..end: True where match_viewer draws "homography  none"."""
@@ -96,15 +120,15 @@ def homography_missing(hom, start: int, end: int) -> np.ndarray:
 
 def signals_from_viewer_data(source: str, start: int, end: int, atd, hom, pitch=None) -> SourceSignals:
     """Signals from what match_viewer.load_atd / load_homography return."""
-    n = end - start + 1
+    n, pitch = end - start + 1, tuple(pitch or pitch_m())
     if atd:
         ball_missing = ~np.isfinite(atd["ball"][:, 0])
         count = atd["count"]
-        ball_xy = atd["ball"][:, :2] * np.asarray(pitch or pitch_m())
+        ball_xy = atd["ball"][:, :2] * np.asarray(pitch)
     else:
         ball_missing, count, ball_xy = np.ones(n, dtype=bool), np.zeros(n, dtype=np.int64), None
     hom_missing = homography_missing(hom, start, end) if hom is not None else np.ones(n, dtype=bool)
-    return SourceSignals(source, start, ball_missing, count, hom_missing, ball_xy)
+    return SourceSignals(source, start, ball_missing, count, hom_missing, ball_xy, pitch)
 
 
 def find_inputs(source: str):
@@ -165,6 +189,7 @@ def load_from_export(export_dir: str) -> SourceSignals:
         raise ValueError(f"{export_dir}: data.bin has {data.size} floats, expected {n} x {block}")
     data = data.reshape(n, block)
     count = np.asarray(meta["count"], dtype=np.int64) if meta.get("count") else np.zeros(n, dtype=np.int64)
-    ball_xy = data[:, 9:11].astype(np.float64) * np.asarray(meta.get("pitch") or pitch_m())
+    pitch = tuple(meta.get("pitch") or pitch_m())
+    ball_xy = data[:, 9:11].astype(np.float64) * np.asarray(pitch)
     return SourceSignals(meta["source"], int(meta["start"]), ~np.isfinite(data[:, 9]), count,
-                         ~np.isfinite(data[:, 0]), ball_xy)
+                         ~np.isfinite(data[:, 0]), ball_xy, pitch)

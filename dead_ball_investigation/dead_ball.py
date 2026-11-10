@@ -11,7 +11,10 @@ A ball-lost interval is taken whole when it shares at least one frame with a no-
 Then, in this order:
     1. no counterpart   frames without a counterpart in the other video are dead (on the tactical
                         timeline: before the broadcast starts, halftime, after it ends)
-    2. still ball       a gap between two dead intervals is dead when the ball stays within
+    2. off pitch        the tactical ball is off the pitch (x or y ∉ [-0.002, 1.002] for more than
+                        1 s, the BALL OFF PITCH row); where the tactical ball is missing, the
+                        broadcast ball off the pitch counts instead
+    3. still ball       a gap between two dead intervals is dead when the ball stays within
                         `still_radius_m` of where it is first seen in the gap, for the whole gap
 
 The terms are evaluated frame by frame on either timeline: the other recording's signals are
@@ -21,7 +24,8 @@ counterpart is never evidence of a dead ball; step 1 is what makes it one.
 
 The full method runs on the tactical timeline, the one the submission is indexed to. Broadcast
 frames with a tactical counterpart take its result, so both timelines agree; broadcast frames
-without one get the baseline and step 1 on their own signals.
+without one get the baseline and steps 1 and 2 on their own signals (no tactical ball there, so
+step 2 reads the broadcast's).
 """
 
 from __future__ import annotations
@@ -35,31 +39,37 @@ import numpy as np
 if __package__ in (None, ""):  # run as a file: make the package importable
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from dead_ball_investigation.signals import SourceSignals  # noqa: E402
+from dead_ball_investigation.signals import OFF_PITCH_MARGIN, OFF_PITCH_MIN_S, SourceSignals  # noqa: E402
 from dead_ball_investigation.sync import SyncMap  # noqa: E402
 
 STILL_RADIUS_M = 1.5
 FORMULA = ("baseline = (broadcast homography missing ∩ broadcast player count ≠ 22) "
            "∪ (the (tactical ball missing ∩ broadcast ball missing) intervals overlapping it); "
            "then 1. no counterpart in the other video is dead; "
-           "2. a gap between dead intervals in which the ball stays still is dead")
+           "2. the tactical ball off the pitch (the broadcast's where the tactical ball is missing) is dead; "
+           "3. a gap between dead intervals in which the ball stays still is dead")
 TERMS = {
     "no_view": "broadcast homography missing ∩ broadcast player count ≠ 22",
     "ball_lost": "tactical ball missing ∩ broadcast ball missing (every interval)",
     "ball_lost_kept": "the ball_lost intervals that overlap a no_view interval",
     "baseline": "no_view ∪ ball_lost_kept",
     "no_counterpart": "step 1: frames without a counterpart in the other video",
-    "still_gap": "step 2: gaps between dead intervals in which the ball stays within the still radius",
+    "off_pitch": "step 2: tactical ball off the pitch (x or y ∉ [-0.002, 1.002] for > 1 s); "
+                 "where the tactical ball is missing, the broadcast ball off the pitch",
+    "still_gap": "step 3: gaps between dead intervals in which the ball stays within the still radius",
 }
 
 
 @dataclass
 class Params:
-    """Knobs of the method; the defaults are the full method (baseline, then steps 1 and 2)."""
+    """Knobs of the method; the defaults are the full method (baseline, then steps 1, 2 and 3)."""
     max_gap: int = 0                        # baseline: frames between a ball-lost and a no-view interval
     unmapped_signals_missing: bool = False  # other side's signals where a frame has no counterpart
     counterpart_step: bool = True           # step 1
-    still_step: bool = True                 # step 2
+    off_pitch_step: bool = True             # step 2
+    off_pitch_margin: float = OFF_PITCH_MARGIN
+    off_pitch_min_s: float = OFF_PITCH_MIN_S
+    still_step: bool = True                 # step 3
     still_radius_m: float = STILL_RADIUS_M
 
     def to_json(self):
@@ -116,8 +126,13 @@ def ball_travel(xy) -> float | None:
     return float(np.hypot(*(seen - seen[0]).T).max())
 
 
+def off_pitch(t_ball_seen, t_ball_off, b_ball_off):
+    """Step 2: the tactical ball off the pitch; where the tactical ball is not seen, the broadcast's."""
+    return np.where(np.asarray(t_ball_seen, bool), np.asarray(t_ball_off, bool), np.asarray(b_ball_off, bool))
+
+
 def still_gaps(dead, ball_xy_by_preference, radius_m: float = STILL_RADIUS_M):
-    """Step 2: (mask of the gaps to fill, stats). A gap is the frames between two consecutive dead
+    """Step 3: (mask of the gaps to fill, stats). A gap is the frames between two consecutive dead
     intervals; it is filled when the ball travels less than radius_m in it. The ball is read from
     the first position array that sees it at all in the gap (tactical before broadcast); a gap in
     which no array sees the ball is left alone."""
@@ -152,6 +167,9 @@ class Timeline:
     b_count_off: np.ndarray
     t_ball_xy: np.ndarray         # (n, 2) metres, NaN where missing
     b_ball_xy: np.ndarray
+    t_ball_seen: np.ndarray       # the tactical ball is tracked (False where the frame has no tactical counterpart)
+    t_ball_off: np.ndarray        # BALL OFF PITCH of each source, on its own frames, pulled across
+    b_ball_off: np.ndarray
     other_frame: np.ndarray       # counterpart video frame on the other recording, -1 where none
 
     @property
@@ -170,6 +188,7 @@ class DeadBall:
     ball_lost: np.ndarray
     ball_lost_kept: np.ndarray
     no_counterpart: np.ndarray
+    off_pitch: np.ndarray
     still_gap: np.ndarray
     covered: np.ndarray
     gaps: dict = field(default_factory=dict)
@@ -212,8 +231,9 @@ class SyncedMatch:
     def frames_of(self, side: str) -> int:
         return int((self.video_frames or {}).get(side) or self.source(side).end + 1)
 
-    def timeline(self, side: str = "tactical", unmapped_signals_missing: bool = False) -> Timeline:
+    def timeline(self, side: str = "tactical", params: Params | None = None) -> Timeline:
         """All signals on the frames of `side`; the other side's come through the sync map."""
+        p = params or Params()
         other = "broadcast" if side == "tactical" else "tactical"
         own, oth = self.source(side), self.source(other)
         row = self.sync.index(own.start, own.end, side, oth.start, oth.end)
@@ -226,16 +246,18 @@ class SyncedMatch:
             out[covered] = arr[row[covered]]
             return out
 
-        miss = bool(unmapped_signals_missing)
+        miss = bool(p.unmapped_signals_missing)
+        own_off, oth_off = (s.ball_off(self.sync.fps, p.off_pitch_margin, p.off_pitch_min_s) for s in (own, oth))
         if side == "tactical":
-            t_ball, t_xy = own.ball_missing, own.ball_xy
+            t_ball, t_xy, t_seen, t_off = own.ball_missing, own.ball_xy, ~own.ball_missing, own_off
             b_ball, b_hom, b_count = pull(oth.ball_missing, miss), pull(oth.hom_missing, miss), pull(oth.count_off, miss)
-            b_xy = pull(oth.ball_xy, np.nan)
+            b_xy, b_off = pull(oth.ball_xy, np.nan), pull(oth_off, False)
         else:
             t_ball, t_xy = pull(oth.ball_missing, miss), pull(oth.ball_xy, np.nan)
-            b_ball, b_hom, b_count, b_xy = own.ball_missing, own.hom_missing, own.count_off, own.ball_xy
+            t_seen, t_off = pull(~oth.ball_missing, False), pull(oth_off, False)
+            b_ball, b_hom, b_count, b_xy, b_off = own.ball_missing, own.hom_missing, own.count_off, own.ball_xy, own_off
         return Timeline(side, own.start, covered, unmapped, t_ball, b_ball, b_hom, b_count, t_xy, b_xy,
-                        np.where(covered, row + oth.start, -1))
+                        t_seen, t_off, b_off, np.where(covered, row + oth.start, -1))
 
     def synced_tags(self):
         """Smart Tagging instances with their span mapped onto the broadcast (None where cut)."""
@@ -246,29 +268,30 @@ class SyncedMatch:
         return out
 
 
-def _baseline(tl: Timeline, p: Params):
+def _terms(tl: Timeline, p: Params):
     no_view, ball_lost, kept, base = dead_ball_terms(tl.b_hom_missing, tl.b_count_off, tl.t_ball_missing,
                                                      tl.b_ball_missing, p.max_gap)
     no_cp = tl.unmapped & bool(p.counterpart_step)
-    return no_view, ball_lost, kept, base, no_cp
+    off = off_pitch(tl.t_ball_seen, tl.t_ball_off, tl.b_ball_off) & bool(p.off_pitch_step)
+    return no_view, ball_lost, kept, base, no_cp, off
 
 
 def annotate_dead_ball(match: SyncedMatch, params: Params | None = None):
     """Dead-ball intervals on both timelines: {"tactical": DeadBall, "broadcast": DeadBall}."""
     p = params or Params()
-    t = match.timeline("tactical", p.unmapped_signals_missing)
-    no_view, ball_lost, kept, base, no_cp = _baseline(t, p)
-    dead = base | no_cp
+    t = match.timeline("tactical", p)
+    no_view, ball_lost, kept, base, no_cp, off = _terms(t, p)
+    dead = base | no_cp | off
     still, gaps = (still_gaps(dead, (t.t_ball_xy, t.b_ball_xy), p.still_radius_m) if p.still_step
                    else (np.zeros(t.n, dtype=bool), {}))
-    tac = DeadBall("tactical", t.start, dead | still, base, no_view, ball_lost, kept, no_cp, still, t.covered, gaps)
+    tac = DeadBall("tactical", t.start, dead | still, base, no_view, ball_lost, kept, no_cp, off, still, t.covered, gaps)
 
-    b = match.timeline("broadcast", p.unmapped_signals_missing)
-    no_view, ball_lost, kept, base, no_cp = _baseline(b, p)
-    dead, still = base | no_cp, np.zeros(b.n, dtype=bool)
+    b = match.timeline("broadcast", p)
+    no_view, ball_lost, kept, base, no_cp, off = _terms(b, p)
+    dead, still = base | no_cp | off, np.zeros(b.n, dtype=bool)
     rows = b.other_frame[b.covered] - t.start
-    dead[b.covered], still[b.covered] = tac.dead[rows], tac.still_gap[rows]
-    br = DeadBall("broadcast", b.start, dead, base, no_view, ball_lost, kept, no_cp, still, b.covered)
+    dead[b.covered], off[b.covered], still[b.covered] = tac.dead[rows], tac.off_pitch[rows], tac.still_gap[rows]
+    br = DeadBall("broadcast", b.start, dead, base, no_view, ball_lost, kept, no_cp, off, still, b.covered)
     return {"tactical": tac, "broadcast": br}
 
 
@@ -294,7 +317,7 @@ def to_document(match: SyncedMatch, result, sync_path: str | None = None, params
              "tactical": [e["a"], e["b"]], "broadcast": [e["broadcast_a"], e["broadcast_b"]]}
             for e in match.synced_tags()]
     return {
-        "version": 3,
+        "version": 4,
         "formula": FORMULA,
         "terms": TERMS,
         "params": p.to_json(),

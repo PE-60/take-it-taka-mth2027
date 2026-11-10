@@ -110,3 +110,6 @@ TODO:
 Review:
 tac fr: 114780; gap to be removed - 142989; gap to be removed - 62217; use fact that structures do not match (broadcast replays) and ball is missing from tactical - 122724; tracks a bird instead of the ball - 10951
 mnogo smeshna homografiq: tac 137015, br 110095; 
+
+SHOW:
+tac fr: short no d-ball gap which was fixed and caught 170247

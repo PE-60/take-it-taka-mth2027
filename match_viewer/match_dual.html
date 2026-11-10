@@ -115,10 +115,10 @@ const KEY = 'pv:dual:' + q.get('t') + '|' + q.get('b');
 const RG = 2, GG = 10, OVH = 14;
 const DEFAULT_ROWS = ['GT', 'PRED', 'NAIVE', 'L&H', 'DEAD BALL', 'RESTART', 'KICK', 'BALL LOST', 'BALL OFF PITCH', 'BALL SPEED', 'COUNT ≠ 22', 'HOMOGRAPHY'];
 const DEFAULT_PAIRS = [['L&H', 'L&H'], ['GT', 'L&H']];
-const DEAD_ROWS = ['DEAD BALL', 'DEAD (BASELINE)', 'NO VIEW (HOM ∅ ∩ ≠22)', 'BALL LOST T∩B', 'NO COUNTERPART', 'STILL-BALL GAP'];
+const DEAD_ROWS = ['DEAD BALL', 'DEAD (BASELINE)', 'NO VIEW (HOM ∅ ∩ ≠22)', 'BALL LOST T∩B', 'NO COUNTERPART', 'OFF PITCH T (ELSE B)', 'STILL-BALL GAP'];
 const PRESETS = {
   possession: ['GT', 'PRED', 'NAIVE', 'L&H', 'SEGMENT', 'MINE', 'RESTART', 'KICK'],
-  'dead ball': ['GT', ...DEAD_ROWS, 'RESTART', 'BALL LOST', 'COUNT ≠ 22', 'HOMOGRAPHY'],
+  'dead ball': ['GT', ...DEAD_ROWS, 'RESTART', 'BALL LOST', 'BALL OFF PITCH', 'COUNT ≠ 22', 'HOMOGRAPHY'],
   'data quality': ['BALL LOST', 'BALL OFF PITCH', 'BALL SPEED', 'BALL JUMP', 'PLAYER JUMP', 'DROPOUT <0.5 s', 'VANISH/APPEAR', 'COUNT ≠ 22', '› BOLT', 'HOMOGRAPHY'],
   minimal: ['GT', 'L&H', 'BALL LOST', 'HOMOGRAPHY'],
 };

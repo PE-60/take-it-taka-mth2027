@@ -24,11 +24,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from dead_ball_investigation.dead_ball import (Params, SyncedMatch, annotate, annotate_dead_ball, ball_travel,
                                                dead_ball_mask, dead_ball_terms, intervals_to_mask,
                                                mask_to_intervals, runs_overlapping, to_document)
-from dead_ball_investigation.signals import SourceSignals, homography_missing, load_from_export
+from dead_ball_investigation.signals import SourceSignals, homography_missing, load_from_export, runs_longer_than
 from dead_ball_investigation.sync import SyncMap
 
 DUAL_HTML = os.path.join(os.path.dirname(__file__), "..", "..", "match_viewer", "match_dual.html")
-BASELINE = Params(counterpart_step=False, still_step=False)
+BASELINE = Params(counterpart_step=False, off_pitch_step=False, still_step=False)
+PITCH = (100.0, 50.0)
 
 
 def signals(source, n, start=0, **set_true):
@@ -43,6 +44,13 @@ def signals(source, n, start=0, **set_true):
     for f in set_true.get("count", []):
         count[f - start] = 18
     return SourceSignals(source, start, ball, count, hom)
+
+
+def ball_signals(source, uv):
+    """All-good signals with the ball at the pitch fractions `uv` (NaN = not seen)."""
+    uv = np.asarray(uv, dtype=np.float64)
+    n = len(uv)
+    return SourceSignals(source, 0, ~np.isfinite(uv[:, 0]), np.full(n, 22), np.zeros(n, bool), uv * PITCH, PITCH)
 
 
 class TestSyncMap(unittest.TestCase):
@@ -251,6 +259,68 @@ class TestStillGaps(unittest.TestCase):
     def test_ball_travel(self):
         self.assertIsNone(ball_travel(np.full((4, 2), np.nan)))
         self.assertAlmostEqual(ball_travel([[0, 0], [np.nan, np.nan], [3, 4], [1, 0]]), 5.0)
+
+
+class TestOffPitch(unittest.TestCase):
+    """Step 2 at 25 fps, sync offset 0: off pitch means x or y ∉ [-0.002, 1.002] for more than 25 frames."""
+
+    def test_ball_off_rule(self):
+        uv = np.full((120, 2), 0.5)
+        uv[0:30, 0] = 1.0019                  # inside the margin
+        uv[30:56, 1] = -0.0021                # 26 frames off: kept
+        uv[60:85, 0] = 1.05                   # exactly 25 frames (1 s): dropped
+        uv[90:120, 0] = 1.05
+        uv[105] = np.nan                      # a missing frame splits 90..119 into 15 + 14 frames
+        off = ball_signals("tactical", uv).ball_off(25.0)
+        self.assertEqual(mask_to_intervals(off), [[30, 55]])
+        self.assertEqual(mask_to_intervals(ball_signals("tactical", uv).ball_off(25.0, min_s=0.5)),
+                         [[30, 55], [60, 84], [90, 104], [106, 119]])
+        self.assertEqual(mask_to_intervals(ball_signals("tactical", uv).ball_off(25.0, margin=0.001)),
+                         [[0, 55]])
+        self.assertEqual(mask_to_intervals(runs_longer_than([1, 1, 0, 1, 1, 1, 0, 1], 2)), [[3, 5]])
+
+    def setUp(self):
+        n = 200
+        t, b = np.full((n, 2), 0.5), np.full((n, 2), 0.5)
+        t[10:40, 0] = 1.05                    # tactical off 30 frames
+        t[50:60, 0] = 1.05                    # tactical off 10 frames only: not off, and the tactical ball is seen
+        b[50:90, 0] = 1.05                    # broadcast off 40 frames
+        t[60:90] = np.nan                     #   so where the tactical ball is missing, the broadcast's counts
+        b[100:140, 1] = -0.1                  # broadcast off, but the tactical ball is seen on the pitch
+        t[150:180] = np.nan                   # tactical missing, broadcast on the pitch
+        self.t, self.b = ball_signals("tactical", t), ball_signals("broadcast", b)
+        self.match = SyncedMatch(self.t, self.b, SyncMap([{"tactical": 0, "broadcast": 0}]))
+
+    def test_tactical_else_broadcast(self):
+        res = annotate_dead_ball(self.match, replace(BASELINE, off_pitch_step=True))
+        t, b = res["tactical"], res["broadcast"]
+        self.assertEqual(t.intervals("off_pitch"), [[10, 39], [60, 89]])
+        self.assertEqual(t.intervals("dead"), [[10, 39], [60, 89]])
+        self.assertEqual(t.intervals("baseline"), [])
+        self.assertEqual(b.intervals("off_pitch"), t.intervals("off_pitch"))
+        self.assertEqual(b.intervals("dead"), t.intervals("dead"))
+        self.assertEqual(annotate(self.match, "tactical", BASELINE).intervals("off_pitch"), [])
+
+    def test_before_still_step(self):
+        """Step 3 fills the gap between two step-2 intervals when the ball stays still in it."""
+        t = self.t.ball_xy.copy()
+        t[50:60] = t[40]                      # the short tactical run off the pitch becomes the ball sitting still
+        tac = SourceSignals("tactical", 0, self.t.ball_missing, self.t.count, self.t.hom_missing, t, PITCH)
+        match = SyncedMatch(tac, self.b, self.match.sync)
+        r = annotate(match, "tactical", Params())
+        self.assertEqual(r.intervals("still_gap"), [[40, 59]])
+        self.assertEqual(r.intervals("dead"), [[10, 89]])
+        self.assertEqual(annotate(match, "tactical", Params(off_pitch_step=False)).intervals("dead"), [])
+
+    def test_broadcast_frames_without_tactical(self):
+        """B 0..39 come before tactical frame 0: the broadcast ball decides there."""
+        b = np.full((200, 2), 0.5)
+        b[0:30, 0] = -0.5
+        match = SyncedMatch(self.t, ball_signals("broadcast", b), SyncMap([{"tactical": 0, "broadcast": 40}]),
+                            video_frames={"tactical": 200, "broadcast": 200})
+        r = annotate(match, "broadcast", replace(BASELINE, off_pitch_step=True))
+        self.assertEqual(r.intervals("off_pitch")[0], [0, 29])
+        self.assertEqual(r.intervals("off_pitch")[1:], [[50, 79]])   # = T 10..39
 
 
 class TestLoaders(unittest.TestCase):
