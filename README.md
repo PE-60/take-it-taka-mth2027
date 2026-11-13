@@ -137,10 +137,13 @@ starter/
   load_atd.py               read the tracking and line it up with video frames
   load_smart_tagging.py     read the tactical tagging as video-frame intervals
   load_homography.py        read the homography; project pitch <-> pixels
+  extract_shirt_histograms.py extract torso-colour histograms on public-GT frames
   utils.py                  pitch plotting for the notebooks
   01_smart_tagging.ipynb    guided tour of the tactical tagging
   02_tracking_atd.ipynb     guided tour of the tracking data, with plots
   03_first_submission.ipynb data in, scored submission out — start here
+  04_tracking_visibility_intervals.ipynb
+                            tracker-slot timeline by pitch and camera visibility
 data/                       unpack the downloaded match assets here. Empty in a fresh clone
 ```
 
