@@ -93,11 +93,12 @@ For the L&H algo:
     Count no counterpart of broadcast video as deadball too (i.e.to catch beginning, halftime, end in tactical video)
     Between two dead ball intervals, if the ball does not move at least 1-2 meters for the whole gap between the d-ball intervals, connect the two deadball intervals (i.e. fill the gap as dead ball too)
     Add info from smart tags!!!
+    Check when ball is outside of the field using tactical (and broadcast maybe? when tactical is missing) - this should fix missing throw ins.
+    For sure add a padding to the coords: don't count d-ball if cooords >= 1 + 0.002 and only for less than 1s
 TODO: 
     Finalize dead ball:
 
-        Check when ball is outside of the field using tactical (and broadcast maybe? when tactical is missing) - this should fix missing throw ins.
-            For sure add a padding to the coords: don't count d-ball if cooords >= 1 + 0.002 and only for less than 1s
+
         For small gaps (but maybe also for all kinds of gaps) between d-ball intervals, check if the structure of the tracked objects which are moving in the two videos is relatively the same. (This could potentially remove gaps, where the broadcast shows a replay while on the tactical video, i.e. on the pitch, nothing is happening) 
 
     Understand how spellF1 score is calculated
@@ -105,6 +106,13 @@ TODO:
 
     When assessing short possesion intervals, check at the begining and end of the intervals, the ball has some acceleration, depicting a kick - if not, do not count it as a change of possesion, because it may be that the ball is in the air and its projection passes near an opposing team's player (could also happen on the ground, if the ball passes near a player and they don't catch it)   
 
+    Deadball_investigatopn remains the same. New folder - possesion_algorithms - going to contain different possesion algorithms. Each algorithm should be able to specify: 1. if it should run with deadball intervals in mind (i.e. only label possesion on non-deadball intervals, or on the whole video); 2. if it should use tactical video, or synchronized broadcast, or tactical and fallback to synced broadcast; 3. should output a .csv file correctly formatted in evaluation/results; 4. make match viewer (and dual match viewer) such that in the loaded html web page, on the timeline section I can add any (and however much I want) algorithms for comparison with oneanother and with the ground truth.
+
+
+
+DOCUMENTATION TODO:
+    deadball: exact margins need better clarifications and citations
+    synchronize videos: explain margins
 
 
 Review:

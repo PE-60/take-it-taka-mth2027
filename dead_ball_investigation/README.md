@@ -14,13 +14,14 @@ then, in this order:
 ```
 
 **Baseline.** A ball-lost interval joins the dead ball whole when it shares at least one frame with
-a no-view interval; a ball-lost interval on its own is not dead ball. `run.py --max-gap N` also
+a no-view interval; **a ball-lost interval on its own is not dead ball**. `run.py --max-gap N` also
 accepts ball-lost intervals that end or start within N frames of a no-view interval.
 
 **Step 1** catches what the broadcast does not show: on the tactical timeline, before the broadcast
 starts, halftime, and after it ends. "No counterpart" means the sync map gives none, or gives a
 frame off the end of the other video; a counterpart that exists but is outside a partial export
-does not count.
+does not count. 
+**Why is it used?** Because the broadcast should *broadcast* the match, i.e. ball is in play only when the two videos show something.
 
 **Step 2** uses the viewer's BALL OFF PITCH row for each recording: the ball is tracked with x or
 y outside [-0.002, 1.002] (fractions of the pitch), on a run of more than 1 s of consecutive frames;
@@ -28,12 +29,15 @@ a frame without the ball ends the run. On a frame where the tactical ball is tra
 row decides, even when the broadcast says otherwise. Only where the tactical ball is missing does
 the broadcast row count. Broadcast frames without a tactical counterpart use the broadcast row.
 `--off-pitch-margin` and `--off-pitch-min-s` change the 0.002 and the 1 s.
+**Why use [-0.002, 1.002] as intervals?** Because 0.002 in normalized pitch coordinates is roughly ~20cm and the ball's actual size is around that much, so we use it as an error margin  (and also the ball must fully cross the pitch lines for a restart). 
+**Why use 1s as a time interval?** Even for the shortest restarts - a throw in - less than a second is unphysical to serve a restart.
 
 **Step 3** runs on the dead intervals after steps 1 and 2 (so halftime, the match ends and the
 ball out of play count as neighbours) and only between two of them, never before the first or after the last. The ball
 position is the tactical ATD ball, in metres; the broadcast ball is used only for a gap in which
 the tactical one is never seen. A gap in which neither sees the ball is left alone: there is no
 evidence it was still. `--still-radius M` changes the 1.5 m.
+**Why use 1.5m?** This is the minimal distance a player should be from player serving a restart (for a throw-in, for other restarts the distances are bigger - usually around ~9-10 meters, but we need the minimal of all such).
 
 The full method runs on the tactical timeline; broadcast frames with a tactical counterpart take its
 result, so both timelines agree. `dead_ball.json` keeps every stage as a term: `no_view`,

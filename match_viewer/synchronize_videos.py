@@ -14,7 +14,7 @@ showing the same moment; from an anchor up to the next one, broadcast = tactical
 Second half: ball-speed cross-correlation
 -----------------------------------------
 Tactical: the first kick-off tag whose Half mentions 2 (or, failing that, the first one more than
-50 minutes after the first kick-off). From that tag's start, take the first whole stretch where the
+60 !TODO! (45 min 1st half + 15 min halftime pause) minutes after the first kick-off). From that tag's start, take the first whole stretch where the
 ball is never missing (at least SIGNATURE_MIN_S long; shorter blips are skipped) and use its
 frame-derived ball speed as a signature.
 Broadcast: frame-derived ball speed in the window from 45 minutes after the first-half kick-off
@@ -40,9 +40,9 @@ Broadcast kick-off frame
 The ATD ball *speed channel* is typically empty (match_viewer prints a note and falls back). Ball
 speed is therefore derived the same way as match_viewer.bspeed_f: consecutive normalised (x, y)
 positions, scaled by the pitch in metres, times fps. On the broadcast ATD (one record per
-broadcast video frame), return the first frame where that speed exceeds 10 m/s.
+broadcast video frame), return the first frame where that speed exceeds 10 m/s - i.e. it is kicked.
 
-Both videos must report the same fps in their container metadata; otherwise the script stops.
+Both videos must report the same fps in their container metadata; otherwise the script stops!
 """
 
 from __future__ import annotations
