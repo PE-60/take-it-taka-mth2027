@@ -20,6 +20,7 @@ def find_repo(start: str = PACKAGE_DIR) -> str:
 REPO = find_repo()
 VIEWER_DIR = os.path.join(REPO, "match_viewer")
 EXPORT_DIR = os.path.join(VIEWER_DIR, "export")
+DEAD_BALL_JSON = os.path.join(PACKAGE_DIR, "dead_ball.json")  # the output, read by the viewers and possesion_algorithms
 if REPO not in sys.path:
     sys.path.insert(0, REPO)  # games.py lives at the repo root
 

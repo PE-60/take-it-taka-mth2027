@@ -1,4 +1,4 @@
-"""Compute dead-ball intervals for both recordings and write match_viewer/export/dead_ball.json.
+"""Compute dead-ball intervals for both recordings and write dead_ball_investigation/dead_ball.json.
 
     python dead_ball_investigation/run.py                 # from the raw data files (parses both ATDs)
     python dead_ball_investigation/run.py --from-exports  # from match_viewer exports (fast)
@@ -8,8 +8,9 @@
 Every file in the package also runs as a file from any directory; `python -m dead_ball_investigation`
 works from the repo root.
 
-match_viewer.html picks up export/dead_ball.json on load: a "dead ball (sync)" row group in the
-single viewer and in the dual viewer (match_viewer.py --dual --serve).
+match_viewer.html picks up dead_ball_investigation/dead_ball.json on load: a "dead ball (sync)" row
+group in the single viewer and in the dual viewer (match_viewer.py --dual --serve). The algorithms in
+possesion_algorithms/ that run with dead-ball intervals read the same file.
 """
 
 from __future__ import annotations
@@ -26,12 +27,12 @@ if __package__ in (None, ""):  # run as a file: make the package importable
 
 from dead_ball_investigation.dead_ball import (FORMULA, STILL_RADIUS_M, TERMS, Params, SyncedMatch,  # noqa: E402
                                                annotate_dead_ball, to_document)
-from dead_ball_investigation.paths import EXPORT_DIR, REPO, require_repo  # noqa: E402
+from dead_ball_investigation.paths import DEAD_BALL_JSON, REPO, require_repo  # noqa: E402
 from dead_ball_investigation.signals import (OFF_PITCH_MARGIN, OFF_PITCH_MIN_S, load_from_export,  # noqa: E402
                                              load_source, load_tags, load_tags_from_export)
 from dead_ball_investigation.sync import DEFAULT_SYNC, SyncMap  # noqa: E402
 
-DEFAULT_OUT = os.path.join(EXPORT_DIR, "dead_ball.json")
+DEFAULT_OUT = DEAD_BALL_JSON
 PUBLIC_GT = os.path.join(REPO, "evaluation", "gt", "BAR-ATH_possession_gt_public.csv")
 
 
@@ -93,7 +94,7 @@ def build_match(args) -> tuple[SyncedMatch, dict]:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--sync", default=DEFAULT_SYNC, help="sync file from synchronize_videos.py (default match_viewer/export/sync.json)")
-    ap.add_argument("--out", default=DEFAULT_OUT, help="output JSON (default match_viewer/export/dead_ball.json)")
+    ap.add_argument("--out", default=DEFAULT_OUT, help="output JSON (default dead_ball_investigation/dead_ball.json)")
     ap.add_argument("--from-exports", action="store_true",
                     help="read the signals from match_viewer exports instead of parsing the raw files")
     ap.add_argument("--tactical-export", default="export/tactical_full", help="with --from-exports (relative to match_viewer/)")

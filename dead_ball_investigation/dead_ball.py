@@ -302,7 +302,7 @@ def annotate(match: SyncedMatch, side: str = "tactical", params: Params | None =
 
 def to_document(match: SyncedMatch, result, sync_path: str | None = None, params: Params | None = None,
                 graded=None, inputs=None):
-    """The JSON written to match_viewer/export/dead_ball.json (read by match_viewer.html)."""
+    """The JSON written to dead_ball_investigation/dead_ball.json (read by match_viewer.html)."""
     p = params or Params()
     timelines = {}
     for side, r in result.items():

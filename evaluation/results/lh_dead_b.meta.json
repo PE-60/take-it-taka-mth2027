@@ -1,0 +1,59 @@
+{
+ "name": "lh_dead_b",
+ "algorithm": "lh_dead_b",
+ "class": "LinkHoernigDeadBallBroadcast",
+ "description": "lh_dead on the broadcast tracking, synced onto the tactical timeline",
+ "dead_ball": true,
+ "source": "broadcast",
+ "params": {
+  "t_p": 1.0,
+  "t_a": 2.5,
+  "horizon_s": 1.0
+ },
+ "created": "2026-11-13T14:23:40",
+ "inputs": {
+  "broadcast": {
+   "from": "raw data",
+   "path": "data/broadcast/BAR-ATH_broadcast_atd.txt",
+   "frames": [
+    0,
+    164487
+   ]
+  },
+  "sync": {
+   "path": "match_viewer/export/sync.json",
+   "anchors": [
+    [
+     11187,
+     7173
+    ],
+    [
+     113660,
+     86740
+    ]
+   ]
+  },
+  "dead_ball": {
+   "path": "dead_ball_investigation/dead_ball.json",
+   "frames": 106889,
+   "created": null
+  }
+ },
+ "frames": 199319,
+ "covered": 164488,
+ "labelled_runs": 110,
+ "from_broadcast": 164488,
+ "counts": {
+  "H": 48182,
+  "A": 36556,
+  "D": 106889,
+  "X": 7692
+ },
+ "public_gt": {
+  "gt": "BAR-ATH_possession_gt_public.csv",
+  "spell_f1_mean": 0.19661016949152543,
+  "macro_f1": 0.7498165692216018,
+  "accuracy": 0.7269333333333333,
+  "n_graded": 7500
+ }
+}

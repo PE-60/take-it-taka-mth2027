@@ -79,8 +79,8 @@ python match_viewer/match_viewer.py --dual --mode full --export --serve
                                                            # 2. export both, compute dead_ball.json, open the dual view
 ```
 
-`--dual` computes `dead_ball.json` whenever it is missing or older than `sync.json`, either export
-or the `dead_ball_investigation/*.py` files;
+`--dual` computes `dead_ball_investigation/dead_ball.json` whenever it is missing or older than
+`sync.json`, either export or the `dead_ball_investigation/*.py` files;
 `--dead-ball` forces it. When the viewers have no dead-ball data they say so: the dual view shows
 "no dead-ball rows" next to the sync offset (hover it for the reason), the normal view in its title line.
 
@@ -103,18 +103,17 @@ and by code that does `import dead_ball_investigation`.
 
 The folder must sit at the repo root, next to `match_viewer/` and `games.py`; the paths to the data,
 the exports and `sync.json` are found from there. Copy the whole folder (replace any older copy, and
-delete its `__pycache__/`), together with `match_viewer/match_viewer.py`, `match_viewer/match_viewer.html`
-and `match_viewer/match_dual.html`, which hold the `--dead-ball` flag and the dead-ball rows.
+delete its `__pycache__/`), together with `match_viewer/match_viewer.py`, `match_viewer/match_viewer.html` and `match_viewer/match_dual.html`, which hold the `--dead-ball` flag and the dead-ball rows. The viewer's server serves the repo root, so the page reaches `dead_ball_investigation/` next to it.
 
-The output is `match_viewer/export/dead_ball.json`: `[first, last]` inclusive video-frame intervals
-on each timeline for the union and each term, the frames that have a counterpart, the sync anchors
+The output is `dead_ball_investigation/dead_ball.json` (next to the code; `--out` writes it elsewhere):
+`[first, last]` inclusive video-frame intervals on each timeline for the union and each term, the frames that have a counterpart, the sync anchors
 used, per-timeline stats, and the Smart Tagging instances with their spans mapped onto the broadcast.
 The CLI also prints precision and recall of the derived dead ball against `D` in the public
-5-minute ground truth.
+5-minute ground truth. The possession algorithms in `possesion_algorithms/` that run with dead-ball intervals read the tactical timeline of this file.
 
 ## In the viewers
 
-`match_viewer.html` loads `export/dead_ball.json` on start. With it, you get:
+`match_viewer.html` loads `../dead_ball_investigation/dead_ball.json` on start (`?deadball=URL`overrides it). With it, you get:
 
 - a **dead ball (sync)** row group: `DEAD BALL` (the full method, in the GT dead-ball grey),
   `DEAD (BASELINE)`, `NO VIEW (HOM ∅ ∩ ≠22)`, `BALL LOST T∩B` (every ball-lost interval),

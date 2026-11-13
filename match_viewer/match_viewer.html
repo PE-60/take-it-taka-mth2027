@@ -88,7 +88,7 @@ textarea{width:100%;background:var(--panel2);border:1px solid var(--line2);borde
 #rowlabels div.grp{color:var(--dim);letter-spacing:.06em;text-transform:uppercase;font-size:10px} #rowlabels div.pin{color:#fff}
 #tlc{display:block;width:100%;cursor:crosshair}
 #legend{flex:none;display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);align-items:center} #legend span{display:inline-flex;align-items:center;gap:5px} #legend canvas{width:12px;height:12px}
-#rowpop,#ovpop{position:absolute;right:0;top:100%;margin-top:4px;max-height:60vh;overflow:auto;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:10px 12px;display:none;z-index:8;min-width:260px;box-shadow:0 8px 24px rgba(0,0,0,.5)} #rowpop .grp{margin:6px 0 2px}
+#rowpop,#ovpop,#algpop{position:absolute;right:0;top:100%;margin-top:4px;max-height:60vh;overflow:auto;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:10px 12px;display:none;z-index:8;min-width:260px;box-shadow:0 8px 24px rgba(0,0,0,.5)} #rowpop .grp{margin:6px 0 2px}
 #help{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;z-index:20} #help .box{position:absolute;right:calc(var(--sidew) + 10px);top:60px;width:520px;max-height:85vh;overflow:auto;background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:14px 18px}
 #help .box h2{margin:0 0 10px;font-size:14px}
 </style>
@@ -120,8 +120,6 @@ textarea{width:100%;background:var(--panel2);border:1px solid var(--line2);borde
 
   <div class="sec" id="cand"><h3>Candidates <span class="hint" id="candN"></span></h3>
     <select id="candType" style="width:100%;margin-bottom:6px">
-      <option value="gt_vs_lh">GT ≠ L&amp;H heuristic (segment starts)</option>
-      <option value="gt_vs_pred">GT ≠ prediction (segment starts)</option>
       <option value="gt_change">GT transitions</option>
       <option value="restart">restarts (dead ball ends)</option>
       <option value="dead">dead ball, derived (interval starts)</option>
@@ -171,7 +169,7 @@ textarea{width:100%;background:var(--panel2);border:1px solid var(--line2);borde
   <div class="sec"><h3>Layers</h3><div id="layers"></div>
     <div class="row" style="margin-top:6px"><span class="k">possession radius</span><span class="v" id="radV">1.0 m</span></div>
     <input type="range" id="rad" min="0.5" max="3" step="0.1" value="1" style="width:100%">
-    <div class="hint">recomputes NAIVE, L&amp;H and the candidate list live</div>
+    <div class="hint">the ring on the pitch and the "ambiguous ring" candidates; possession itself comes from the algorithms on the timeline</div>
   </div>
 </aside>
 
@@ -182,6 +180,7 @@ textarea{width:100%;background:var(--panel2);border:1px solid var(--line2);borde
     <span class="hint">click = seek · drag = zoom · wheel = zoom at cursor · ⇧ wheel = scroll rows · click the overview to jump</span>
     <span class="sp"></span>
     <span class="lbl">row h</span><input type="range" id="rowH" min="6" max="28" step="1" value="11" title="row height">
+    <button id="bAlgs" title="possession algorithms from evaluation/results/*.csv, to compare with each other and with the ground truth">algorithms ▾</button><div id="algpop"></div>
     <button id="bOverview">overview ▾</button><div id="ovpop"></div>
     <button id="bRows">rows ▾</button><div id="rowpop"></div>
     <span class="lbl">step events</span>
@@ -239,7 +238,6 @@ class DataSet {
   halfOf(f) { for (const h in this.meta.halves) { const [a, b] = this.meta.halves[h]; if (f >= a && f <= b) return +h; } return 0; }
   attackDir(f) { const hv = this.meta.halves; if (!this.meta.home_dir || !hv || !hv['2']) return 0; return f < hv['2'][0] ? this.meta.home_dir : -this.meta.home_dir; }
   gt(r) { return this.meta.gt ? this.meta.gt[r] : null; }
-  pred(r) { return this.meta.pred ? this.meta.pred[r] : null; }
 }
 
 
@@ -296,7 +294,7 @@ class EventIndex {
     this.refereeFrames = [...new Set(this.refereeFrames)].sort((a, b) => a - b);
     this.refereeSignalFrames = [...new Set(this.refereeSignalFrames)].sort((a, b) => a - b);
   }
-  /** Dead-ball intervals from dead_ball_investigation (export/dead_ball.json), on this export's timeline. */
+  /** Dead-ball intervals from dead_ball_investigation/dead_ball.json, on this export's timeline. */
   ingestDeadBall(doc, source) {
     const tl = doc && doc.timelines && doc.timelines[source]; if (!tl) return false;
     const n = this.ds.n, start = this.ds.start;
@@ -323,36 +321,50 @@ class EventIndex {
 const deriveEvents = ds => new EventIndex(ds);
 
 
-// ===== possession.js =====
-// Two possession heuristics, following Link and Hoernig (2017).
-//   naive: whoever is nearest to the ball, if within tp metres
-//   L&H:   you gain the ball the naive way and keep it while the ball, predicted one second
-//          ahead, stays within ta metres of where you will be. A kick with someone else nearest
-//          opens it up again. The team sticks with the last holder while nobody has it,
-//          which is what the challenge says about loose balls.
-function computePossession(ds, kickSet, tp, ta = 2.5, horizonS = 1.0) {
-  const n = ds.n, S = ds.S;
-  const naive = new Array(n).fill(''), lh = new Array(n).fill('');
-  const naivePid = new Int16Array(n).fill(-1), lhPid = new Int16Array(n).fill(-1);
-  const side = []; for (let k = 0; k < S; k++) side.push(ds.sideOf(k));
-  let holder = -1, lastTeam = ''; const h = Math.round(horizonS * ds.fps);
-  const dist = new Float32Array(S);
-  for (let r = 0; r < n; r++) {
-    const b = ds.ball(r); if (!b) { holder = -1; lh[r] = lastTeam; continue; }
-    let best = -1, bd = Infinity;
-    for (let k = 0; k < S; k++) { const p = ds.slot(r, k); if (!p) { dist[k] = Infinity; continue; } const d = ds.metres(b, p); dist[k] = d; if (d < bd) { bd = d; best = k; } }
-    if (best >= 0 && bd <= tp) { naive[r] = side[best]; naivePid[r] = best; }
-    if (holder >= 0 && ds.slot(r, holder)) {
-      const r2 = Math.min(n - 1, r + h), b2 = ds.ball(r2), p2 = ds.slot(r2, holder);
-      const df = (b2 && p2) ? ds.metres(b2, p2) : dist[holder];
-      const kicked = kickSet.has(r) && best >= 0 && bd <= tp && best !== holder;
-      if (df > ta || kicked) holder = -1;
-    } else holder = -1;
-    if (holder < 0 && best >= 0 && bd <= tp) holder = best;
-    if (holder >= 0) { lastTeam = side[holder]; lhPid[r] = holder; }
-    lh[r] = lastTeam;                                   // the team stays through flight, duels and lost tracking
+// ===== algorithms.js =====
+// Possession algorithms are not computed here: possesion_algorithms/run.py writes them to
+// evaluation/results/<name>.csv (frame,label for every tactical video frame, the submission format)
+// with an optional <name>.meta.json. These read such a CSV onto an export's rows.
+// Label codes: 0 none, 1 H, 2 A, 3 D, 4 X.
+const RESULT_LABELS = ['', 'H', 'A', 'D', 'X'];
+const LABEL_CODE = { H: 1, A: 2, D: 3, X: 4 };
+
+/** frame,label CSV text -> Uint8Array of label codes indexed by tactical frame. */
+function parseLabelCsv(text) {
+  const lines = text.split(/\r?\n/), head = (lines[0] || '').split(',').map(s => s.trim().toLowerCase());
+  const fi = head.indexOf('frame'), li = head.indexOf('label');
+  if (fi < 0 || li < 0) throw new Error('expected a frame,label header');
+  const fr = [], lb = []; let max = -1;
+  for (let i = 1; i < lines.length; i++) {
+    const c = lines[i].split(','); if (c.length <= Math.max(fi, li)) continue;
+    const f = +c[fi]; if (!Number.isInteger(f) || f < 0) continue;
+    fr.push(f); lb.push(LABEL_CODE[c[li].trim().toUpperCase()] || 0); if (f > max) max = f;
   }
-  return { naive, lh, naivePid, lhPid, tp };
+  const out = new Uint8Array(max + 1); for (let i = 0; i < fr.length; i++) out[fr[i]] = lb[i];
+  return out;
+}
+/** Broadcast frame -> tactical frame (null where none), the rule of SyncMap in match_dual.html and
+ *  dead_ball_investigation/sync.py. anchors: [{tactical, broadcast}]. */
+function syncToTactical(anchors) {
+  const A = anchors.map(a => ({ t: +a.tactical, b: +a.broadcast })).sort((p, r) => p.t - r.t);
+  return f => {
+    if (!A.length) return f;
+    let k = 0; for (let i = 0; i < A.length; i++) if (A[i].b <= f) k = i;
+    const g = f - A[k].b + A[k].t;
+    return (k + 1 < A.length && g >= A[k + 1].t) || g < 0 ? null : g;
+  };
+}
+/** Codes per export row: row r is video frame start + r, toTactical maps it onto the CSV's frames. */
+function codesForRows(frameCodes, start, n, toTactical = null) {
+  const out = new Uint8Array(n);
+  for (let r = 0; r < n; r++) { const f = toTactical ? toTactical(start + r) : start + r; if (f !== null && f >= 0 && f < frameCodes.length) out[r] = frameCodes[f]; }
+  return out;
+}
+/** How often `codes` matches `ref` on the frames ref labels H, A or D (an X or no label counts as wrong). */
+function agreement(codes, ref) {
+  let n = 0, same = 0;
+  for (let r = 0; r < ref.length; r++) { const c = ref[r]; if (c < 1 || c > 3) continue; n++; if (codes[r] === c) same++; }
+  return { n, same, share: n ? same / n : null };
 }
 
 
@@ -562,6 +574,18 @@ function rasterIntensity(get, r0, r1, W, vmax, color, bg, { bad = null, badColor
   }
   return px;
 }
+// get(r): 0 nothing to compare, 1 agree, 2 disagree. Dark green where all agree, towards magenta
+// with the share that disagrees.
+function rasterDiff(get, r0, r1, W, bg) {
+  const px = new Uint8Array(W * 3), B = bucket(r0, r1, W);
+  for (let i = 0; i < W; i++) {
+    const [a, b] = B(i); let n = 0, d = 0;
+    for (let r = a; r < b; r++) { const v = get(r); if (v) { n++; if (v === 2) d++; } }
+    if (!n) { put(px, i, bg); continue; }
+    const k = d / n; put(px, i, k ? [34 + 196 * k, 34 + 46 * k, 34 + 196 * k] : [38, 62, 40]);
+  }
+  return px;
+}
 function rasterCategorical(get, r0, r1, W, bg) {
   // get(r) gives a colour or null, the first colour inside a pixel wins
   const px = new Uint8Array(W * 3), B = bucket(r0, r1, W);
@@ -592,14 +616,13 @@ function usualCount(counts) {
 }
 // Per bin summaries over the whole export for the overview bands.
 // restarts and kicks are counts, everything else is a fraction of the bin.
-function aggregateBands(ds, events, poss, binFrames) {
+function aggregateBands(ds, events, binFrames) {
   const out = []; const n = ds.n, m = ds.meta;
   const usual = m.count ? usualCount(m.count) : 22;
   for (let a = 0; a < n; a += binFrames) {
-    const b = Math.min(n, a + binFrames); let lost = 0, h = 0, aa = 0, cnt = 0, hom = 0;
+    const b = Math.min(n, a + binFrames); let lost = 0, cnt = 0, hom = 0;
     for (let r = a; r < b; r++) {
       if (!ds.ball(r)) lost++;
-      if (poss.lh[r] === 'H') h++; else if (poss.lh[r] === 'A') aa++;
       if (m.count && m.count[r] !== usual) cnt++;
       if (m.hom_err && (m.hom_err[r] < 0 || m.hom_err[r] > 3)) hom++;
     }
@@ -607,7 +630,7 @@ function aggregateBands(ds, events, poss, binFrames) {
     out.push({ a, b: b - 1, len,
       restarts: events.restartFrames.filter(r => r >= a && r < b).length,
       kicks: [...events.kick].filter(r => r >= a && r < b).length,
-      lostFrac: lost / len, shareH: h / len, shareA: aa / len, countBad: cnt / len, homBad: hom / len });
+      lostFrac: lost / len, countBad: cnt / len, homBad: hom / len });
   }
   return out;
 }
@@ -656,40 +679,42 @@ const lighten = (c, k) => c.map(v => Math.round(v + (255 - v) * k));
 const STATE_SHADE = { controlled: 0, flight: 0.45, loose: 0.25, dead: null };
 
 // ---------------------------------------------------------------- state
-let ds, E, P, store, queue, exportDir;
+let ds, E, store, queue, exportDir;
 let cur = 0, pinned = [], hover = null, layers = {}, view = [0, 0];
 let armed = null, pendingClicks = [], magnify = false, loop = null;
-let candFrames = [], candType = 'gt_vs_lh', includeHandled = false;
+let candFrames = [], candType = 'gt_change', includeHandled = false;
 // clear() fires 'pv:changed' so an embedding page (match_dual.html) knows to redraw its strips
 let ROWS = [], rowCache = new (class extends Map { clear() { super.clear(); window.dispatchEvent(new Event('pv:changed')); } })(), tlDrag = null, slotsOpen = false;
 let RH = 11, OVH = 10, BANDH = 7;
 const RG = 2, GG = 9, FLAG = 14;
 // Things that can show up in the overview at the top of the timeline. GT always comes first.
 // A strip just reuses one of the rows, a band is a per bin summary from aggregateBands.
+// Every algorithm picked under "algorithms ▾" adds a strip of its own (see overviewItems).
 const OVERVIEW_ITEMS = [
-  { name: 'GT', kind: 'strip', row: 'GT' }, { name: 'PRED', kind: 'strip', row: 'PRED' }, { name: 'L&H', kind: 'strip', row: 'L&H' }, { name: 'SEGMENT', kind: 'strip', row: 'SEGMENT' },
+  { name: 'GT', kind: 'strip', row: 'GT' }, { name: 'SEGMENT', kind: 'strip', row: 'SEGMENT' },
   { name: 'DEAD BALL', kind: 'strip', row: 'DEAD BALL' },
   { name: 'restarts', kind: 'band', key: 'restarts', count: true, color: 'good' }, { name: 'kicks', kind: 'band', key: 'kicks', count: true, color: 'kick' },
-  { name: 'ball lost', kind: 'band', key: 'lostFrac', color: 'lost' }, { name: 'L&H share', kind: 'band', key: 'share' },
+  { name: 'ball lost', kind: 'band', key: 'lostFrac', color: 'lost' },
   { name: 'player count off', kind: 'band', key: 'countBad', color: 'warn' }, { name: 'homography bad', kind: 'band', key: 'homBad', color: 'bad' },
 ];
-const OVERVIEW_DEFAULT = ['GT', 'DEAD BALL', 'restarts', 'ball lost', 'L&H share'];
+const OVERVIEW_DEFAULT = ['GT', 'DEAD BALL', 'restarts', 'ball lost'];
 
 const LAYERS = [
-  ['pitch', 'pitch lines', true], ['players', 'players', true], ['holder', 'L&H holder disc', true], ['ring', 'possession ring', true],
-  ['ball', 'ball', true], ['trail', 'ball trail (1.5 s)', true], ['future', 'ball future (1 s)', true], ['opp', 'closest opponent line', true],
+  ['pitch', 'pitch lines', true], ['players', 'players', true], ['ring', 'possession ring', true],
+  ['ball', 'ball', true], ['trail', 'ball trail (1.5 s)', true], ['future', 'ball future (1 s)', true],
   ['events', 'event marks (kick / jump / vanish)', true], ['referee', 'AR flag signals', true], ['ann', 'annotation marks', true], ['regions', 'dominant regions', false], ['hull', 'team hulls', false],
   ['arrows', 'attack direction', true], ['labels', 'slot numbers', true],
 ];
 const LAYER_PRESETS = { 'everything': null, 'players + ball': ['pitch', 'players', 'ball', 'labels'], 'referee flags': ['pitch', 'referee'], 'clean video': [] };
+// algorithm rows (and their Δ rows) are shown whatever the preset; pick them under "algorithms ▾"
 const ROW_PRESETS = {
   'all': null,
-  'possession': ['GT', 'PRED', 'NAIVE', 'L&H', 'SEGMENT', 'MINE', 'RESTART', 'KICK'],
+  'possession': ['GT', 'SEGMENT', 'MINE', 'RESTART', 'KICK'],
   'events': ['GT', 'RESTART', 'KICK', 'AR FLAGS', 'ANN EVENTS', 'BOOKMARK'],
   'data quality': ['GT', 'BALL LOST', 'BALL JUMP', 'PLAYER JUMP', 'DROPOUT <0.5 s', 'VANISH/APPEAR', 'COUNT ≠ 22', '› BOLT', 'HOMOGRAPHY', 'ANN DATA'],
   'annotation': ['GT', 'SEGMENT', 'MINE', 'ANN EVENTS', 'ANN DATA', 'SEGMENT B', 'ANN B', 'BOOKMARK'],
   'dead ball': ['GT', 'DEAD BALL', 'DEAD (BASELINE)', 'NO VIEW (HOM ∅ ∩ ≠22)', 'BALL LOST T∩B', 'NO COUNTERPART', 'OFF PITCH T (ELSE B)', 'STILL-BALL GAP', 'RESTART', 'BALL LOST', 'BALL OFF PITCH', 'COUNT ≠ 22', 'HOMOGRAPHY'],
-  'minimal': ['GT', 'L&H', 'RESTART', 'BALL LOST'],
+  'minimal': ['GT', 'RESTART', 'BALL LOST'],
 };
 
 // ---------------------------------------------------------------- boot
@@ -744,11 +769,12 @@ async function loadRefereeSidecars() {
   if (!E.refereeFrames.length) console.warn('[referee] no meta.referee and no sidecar JSON found');
 }
 const DEAD_BALL_HINT = 'python dead_ball_investigation/run.py --from-exports';
+const DEAD_BALL_URL = '../dead_ball_investigation/dead_ball.json';
 async function loadDeadBall() {
-  // written by dead_ball_investigation/run.py; holds intervals for both timelines
+  // written by dead_ball_investigation/run.py next to itself; holds intervals for both timelines
   const src = ds.meta.source || 'tactical';
-  E.deadMissing = 'no export/dead_ball.json';
-  for (const url of [exportDir + '/dead_ball.json', 'export/dead_ball.json']) {
+  E.deadMissing = 'no dead_ball_investigation/dead_ball.json';
+  for (const url of [q.get('deadball'), DEAD_BALL_URL].filter(Boolean)) {
     const doc = await tryFetchJson(url);
     if (!doc) continue;
     if (E.ingestDeadBall(doc, src)) { E.deadMissing = null; console.info('[dead ball] loaded', url, '→', E.deadStarts.length, 'intervals in this export'); return; }
@@ -756,6 +782,133 @@ async function loadDeadBall() {
   }
   console.warn('[dead ball]', E.deadMissing, '— run:', DEAD_BALL_HINT);
 }
+
+// ---------------------------------------------------------------- possession algorithms (evaluation/results/*.csv)
+// The picker under "algorithms ▾" lists the CSVs, each one picked becomes a label row plus a Δ row
+// against the reference (GT by default, or another algorithm). match_dual.html drives the tactical
+// pane's copy of this through window.__pv.algs.
+const RESULTS_INDEX = '__results__.json', RESULTS_DIR_URL = '../evaluation/results/';
+const ALG_HINT = 'python possesion_algorithms/run.py --all';
+const ALG_KEY = q.get('embed') ? null : 'pv:algs';
+const ALG = { index: [], indexError: null, loaded: new Map(), on: [], ref: 'GT', version: 0, toTactical: undefined, error: null, rowNames: new Set() };
+let gtCodes = null;
+async function listResults() {
+  try {
+    const r = await fetch(RESULTS_INDEX, { cache: 'no-store' });
+    if (r.ok) { const j = await r.json(); if (Array.isArray(j)) return j; }
+  } catch (e) {}
+  // another static server: read its listing of evaluation/results/
+  const r = await fetch(RESULTS_DIR_URL, { cache: 'no-store' });
+  if (!r.ok) throw new Error(`${RESULTS_DIR_URL} not reachable (${r.status})`);
+  const names = [...new Set([...(await r.text()).matchAll(/href="([^"?#]+?)\.csv"/g)].map(m => decodeURIComponent(m[1].split('/').pop())))].sort();
+  return Promise.all(names.map(async name => ({ name, url: RESULTS_DIR_URL + encodeURIComponent(name) + '.csv', meta: await tryFetchJson(RESULTS_DIR_URL + encodeURIComponent(name) + '.meta.json') })));
+}
+async function refreshResults() {
+  try { ALG.index = await listResults(); ALG.indexError = null; } catch (e) { ALG.index = []; ALG.indexError = String(e.message || e); }
+  return ALG.index;
+}
+// export rows -> tactical frames: identity on the tactical video, through sync.json on the broadcast
+async function rowMapping() {
+  if (ALG.toTactical !== undefined) return ALG.toTactical;
+  if ((ds.meta.source || 'tactical') === 'tactical') return (ALG.toTactical = null);
+  const url = q.get('sync') || 'export/sync.json', doc = await tryFetchJson(url);
+  if (!doc || !doc.anchors) throw new Error(`no sync anchors at ${url}: tactical CSVs cannot be put on broadcast frames`);
+  return (ALG.toTactical = syncToTactical(doc.anchors));
+}
+function algMeta(name) { const it = ALG.index.find(x => x.name === name); return (it && it.meta) || (ALG.loaded.get(name) || {}).meta || null; }
+function algHint(m) {
+  if (!m) return 'no .meta.json';
+  const s = m.public_gt && Number.isFinite(m.public_gt.spell_f1_mean) ? ` · spellF1 ${m.public_gt.spell_f1_mean.toFixed(3)}` : '';
+  return `${m.dead_ball ? 'alive intervals only' : 'whole video'} · ${m.source || '?'}${s}`;
+}
+async function loadAlgorithm(name, { url = null, text = null } = {}) {
+  if (ALG.loaded.has(name) && !text) return ALG.loaded.get(name);
+  const it = ALG.index.find(x => x.name === name);
+  if (text === null) {
+    const u = url || (it && it.url); if (!u) throw new Error(`${name}: not in evaluation/results/`);
+    const r = await fetch(u, { cache: 'no-store' }); if (!r.ok) throw new Error(`${u}: HTTP ${r.status}`);
+    text = await r.text();
+  }
+  const frames = parseLabelCsv(text), codes = codesForRows(frames, ds.start, ds.n, await rowMapping());
+  const a = { name, meta: it ? it.meta : null, frames: frames.length, codes };
+  ALG.loaded.set(name, a); return a;
+}
+function refCodes() {
+  if (ALG.ref === 'GT') return gtCodes;
+  const a = ALG.loaded.get(ALG.ref); return a && ALG.on.includes(ALG.ref) ? a.codes : null;
+}
+const refName = () => (refCodes() ? ALG.ref : null);
+function algAgreement(name) { const a = ALG.loaded.get(name), ref = refCodes(); return a && ref && name !== ALG.ref ? agreement(a.codes, ref) : null; }
+function algsChanged() {
+  ALG.version++; ALG.error = null;
+  if (ALG.ref !== 'GT' && ALG.ref !== 'none' && !ALG.on.includes(ALG.ref)) ALG.ref = gtCodes ? 'GT' : 'none';
+  if (ALG_KEY) try { localStorage.setItem(ALG_KEY, JSON.stringify({ on: ALG.on, ref: ALG.ref })); } catch (e) {}
+  if (!ROWS.length) return;
+  buildRows(); renderCandOptions(); buildCandidates(); buildLegend(); drawTimeline(); draw();
+}
+async function setAlgorithms(names, ref = undefined) {
+  const ok = [];
+  for (const n of names) { try { await loadAlgorithm(n); ok.push(n); } catch (e) { ALG.error = String(e.message || e); console.warn('[algorithms]', ALG.error); } }
+  const err = ALG.error;
+  ALG.on = ok; if (ref !== undefined) ALG.ref = ref;
+  algsChanged(); ALG.error = err; return ok;
+}
+async function toggleAlgorithm(name, on = !ALG.on.includes(name)) {
+  const next = on ? [...ALG.on.filter(n => n !== name), name] : ALG.on.filter(n => n !== name);
+  return setAlgorithms(next);
+}
+async function addAlgorithmFile(file) {
+  const name = file.name.replace(/\.csv$/i, '');
+  await loadAlgorithm(name, { text: await file.text() });
+  ALG.on = [...ALG.on.filter(n => n !== name), name]; algsChanged();
+}
+async function restoreAlgorithms(saved) {
+  await refreshResults();
+  if (!saved || !saved.on) return;
+  const have = new Set(ALG.index.map(x => x.name));
+  await setAlgorithms(saved.on.filter(n => have.has(n)), saved.ref || 'GT');
+}
+/** The picker, rendered into any element (also one in match_dual.html: elements come from its document). */
+function renderAlgPicker(el, { onChange = null } = {}) {
+  const doc = el.ownerDocument, mk = (tag, cls, html) => { const d = doc.createElement(tag); if (cls) d.className = cls; if (html !== undefined) d.innerHTML = html; return d; };
+  const changed = () => { if (onChange) onChange(); renderAlgPicker(el, { onChange }); };
+  el.innerHTML = '';
+  el.appendChild(mk('div', 'lbl', `possession algorithms <span class="hint" style="text-transform:none;letter-spacing:0">evaluation/results/*.csv</span>`));
+  const refRow = mk('div', 'chk', '<span class="hint">compare against</span>');
+  const sel = mk('select'); sel.style.marginLeft = 'auto';
+  const refs = [...(gtCodes ? ['GT'] : []), ...ALG.on, 'none'];
+  for (const n of refs) { const o = mk('option'); o.value = n; o.textContent = n === 'none' ? 'nothing (no Δ rows)' : n; o.selected = n === ALG.ref; sel.appendChild(o); }
+  sel.onchange = e => { e.stopPropagation(); ALG.ref = sel.value; algsChanged(); changed(); };
+  refRow.appendChild(sel); el.appendChild(refRow);
+  if (ALG.indexError) el.appendChild(mk('div', 'hint', `could not list the results: ${ALG.indexError}`));
+  else if (!ALG.index.length) el.appendChild(mk('div', 'hint', `no CSVs in evaluation/results/ yet; run <span class="mono">${ALG_HINT}</span>`));
+  if (ALG.error) { const d = mk('div', 'hint', ALG.error); d.style.color = 'var(--bad)'; el.appendChild(d); }
+  const names = [...new Set([...ALG.index.map(x => x.name), ...ALG.loaded.keys()])];
+  for (const name of names) {
+    const on = ALG.on.includes(name), ag = on ? algAgreement(name) : null;
+    const l = mk('label', 'chk'); l.style.alignItems = 'flex-start';
+    const agTxt = ag && ag.share !== null ? `<span class="mono" style="margin-left:auto;color:var(--fg)" title="${ag.same} of ${ag.n} frames ${ALG.ref} labels H/A/D">${(100 * ag.share).toFixed(1)} %</span>` : '';
+    l.innerHTML = `<input type="checkbox" ${on ? 'checked' : ''}><span style="flex:1"><span class="mono">${name}</span><br><span class="hint">${ALG.index.some(x => x.name === name) ? algHint(algMeta(name)) : 'loaded from disk'}</span></span>${agTxt}`;
+    l.querySelector('input').onchange = async e => { e.stopPropagation(); await toggleAlgorithm(name, e.target.checked); changed(); };
+    l.onclick = e => e.stopPropagation(); el.appendChild(l);
+  }
+  const bar = mk('div'); bar.style.cssText = 'display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center';
+  const bRef = mk('button', null, 'refresh list'); bRef.onclick = async e => { e.stopPropagation(); await refreshResults(); for (const n of ALG.on) if (ALG.index.some(x => x.name === n)) ALG.loaded.delete(n); await setAlgorithms(ALG.on.slice()); changed(); };
+  const bAll = mk('button', null, 'all'); bAll.onclick = async e => { e.stopPropagation(); await setAlgorithms(ALG.index.map(x => x.name)); changed(); };
+  const bNone = mk('button', null, 'none'); bNone.onclick = async e => { e.stopPropagation(); await setAlgorithms([]); changed(); };
+  const fl = mk('label', 'tool', 'load csv…<input type="file" accept=".csv" multiple style="display:none">'); fl.style.padding = '3px 9px';
+  fl.querySelector('input').onchange = async e => { for (const f of e.target.files) { try { await addAlgorithmFile(f); } catch (err) { ALG.error = `${f.name}: ${err.message || err}`; } } changed(); };
+  fl.onclick = e => e.stopPropagation();
+  bar.append(bRef, bAll, bNone, fl); el.appendChild(bar);
+  el.appendChild(mk('div', 'hint', `Δ rows: dark green = agrees with ${ALG.ref === 'none' ? 'the reference' : ALG.ref}, magenta = share of frames that disagree (where the reference says H, A or D). % = agreement over the whole export.`));
+  el.onclick = e => e.stopPropagation();
+}
+function setupAlgPicker() {
+  const pop = $('#algpop');
+  $('#bAlgs').onclick = e => { e.stopPropagation(); $('#rowpop').style.display = 'none'; $('#ovpop').style.display = 'none'; const open = pop.style.display !== 'block'; pop.style.display = open ? 'block' : 'none'; if (open) { renderAlgPicker(pop); refreshResults().then(() => { if (pop.style.display === 'block') renderAlgPicker(pop); }); } };
+  document.addEventListener('click', e => { if (!pop.contains(e.target)) pop.style.display = 'none'; });
+}
+const algLetter = (name, r) => { const a = ALG.loaded.get(name); return a ? RESULT_LABELS[a.codes[r]] : ''; };
 async function load() {
   exportDir = q.get('d');
   if (!exportDir) { try { exportDir = (await (await fetch('export/latest.json')).json()).dir; } catch (e) { exportDir = 'export/tactical_gt'; } }
@@ -766,6 +919,9 @@ async function load() {
   E = deriveEvents(ds);
   await loadRefereeSidecars();
   await loadDeadBall();
+  gtCodes = meta.gt ? Uint8Array.from(meta.gt, c => LABEL_CODE[c] || 0) : null;
+  if (!gtCodes) ALG.ref = 'none';
+  if (ALG_KEY) { let saved = null; try { saved = JSON.parse(localStorage.getItem(ALG_KEY)); } catch (e) {} await restoreAlgorithms(saved); }
   store = new AnnotationStore({ get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } }, 'pv2:' + exportDir, ds);
   const nRef = E.refereeFrames.length;
   $('#srcName').textContent = `${meta.source} · frames ${meta.start}-${meta.end} · ${(ds.n / ds.fps / 60).toFixed(1)} min` + (nRef ? ` · AR boxes on ${nRef} frames` : '') + (E.dead ? ` · ${E.deadStarts.length} dead-ball intervals` : ` · no dead-ball rows (${E.deadMissing}; run ${DEAD_BALL_HINT})`);
@@ -777,17 +933,16 @@ async function load() {
 function init() {
   const v = $('#v'), ov = $('#ov');
   ov.width = v.videoWidth; ov.height = v.videoHeight;
-  P = computePossession(ds, E.kick, +$('#rad').value);
   view = [0, ds.n - 1];
-  buildLayers(); buildPalette(); buildLegend(); buildRows(); setupTimeline(); setupRowFilter(); setupOverviewFilter(); setupHelp();
-  buildCandidates(); renderBookmarks(); renderAnn(); renderAgreement();
+  buildLayers(); buildPalette(); buildLegend(); buildRows(); setupTimeline(); setupRowFilter(); setupOverviewFilter(); setupAlgPicker(); setupHelp();
+  renderCandOptions(); buildCandidates(); renderBookmarks(); renderAnn(); renderAgreement();
   fit(); new ResizeObserver(fit).observe($('#stage')); window.addEventListener('resize', fit); setTimeout(fit, 300);
   if ('requestVideoFrameCallback' in v) { const cb = (now, md) => { onTime(md.mediaTime); v.requestVideoFrameCallback(cb); }; v.requestVideoFrameCallback(cb); }
   else v.addEventListener('timeupdate', () => onTime(v.currentTime));
   v.addEventListener('seeked', () => onTime(v.currentTime));
   v.addEventListener('play', () => $('#bPlay').textContent = '❚❚ pause'); v.addEventListener('pause', () => $('#bPlay').textContent = '▶ play');
   $('#bPlay').onclick = togglePlay; $('#speed').onchange = e => v.playbackRate = +e.target.value;
-  $('#rad').oninput = e => { $('#radV').textContent = (+e.target.value).toFixed(1) + ' m'; P = computePossession(ds, E.kick, +e.target.value); rowCache.clear(); buildCandidates(); draw(); drawTimeline(); };
+  $('#rad').oninput = e => { $('#radV').textContent = (+e.target.value).toFixed(1) + ' m'; if (candType === 'ambig') buildCandidates(); draw(); };
   $('#bPrev').onclick = () => stepEvent(-1); $('#bNext').onclick = () => stepEvent(1);
   $('#candType').onchange = e => { candType = e.target.value; buildCandidates(); };
   $('#inclHandled').onchange = e => { includeHandled = e.target.checked; };
@@ -1021,18 +1176,34 @@ function finishTool(extra) {
 
 // ---------------------------------------------------------------- candidates and queue (S1)
 function segmentStarts(pred) { const out = []; let prev = false; for (let r = 0; r < ds.n; r++) { const c = pred(r); if (c && !prev) out.push(r); prev = c; } return out; }
+// one "<reference> ≠ <algorithm>" entry per picked algorithm, above the fixed ones
+function renderCandOptions() {
+  const sel = $('#candType'); for (const o of [...sel.querySelectorAll('option[data-alg]')]) o.remove();
+  const ref = refName(), first = sel.firstElementChild;
+  if (ref) for (const name of ALG.on) {
+    if (name === ref) continue;
+    const o = document.createElement('option'); o.value = 'alg:' + name; o.dataset.alg = '1';
+    o.textContent = `${ref} ≠ ${name} (segment starts, where ${ref} says H / A / D)`; sel.insertBefore(o, first);
+  }
+  if (![...sel.options].some(o => o.value === candType)) candType = sel.options[0].value;
+  sel.value = candType;
+}
 function candidateList(t) {
   const gt = r => ds.gt(r), alive = r => gt(r) === 'H' || gt(r) === 'A', tp = +$('#rad').value;
   const ringCount = r => { const b = ds.ball(r); if (!b) return -1; let n = 0; for (const p of ds.players(r)) if (ds.metres(b, p) <= tp) n++; return n; };
+  if (t.startsWith('alg:')) {
+    const name = t.slice(4), a = ALG.loaded.get(name), ref = refCodes(), rn = refName();
+    if (!a || !ref) return { frames: [], label: () => '' };
+    return { frames: segmentStarts(r => ref[r] >= 1 && ref[r] <= 3 && a.codes[r] !== ref[r]),
+      label: r => `${rn} ${RESULT_LABELS[ref[r]]} · ${name} ${RESULT_LABELS[a.codes[r]] || '-'}` };
+  }
   const L = {
-    gt_vs_lh: () => ds.meta.gt ? segmentStarts(r => alive(r) && P.lh[r] && P.lh[r] !== gt(r)) : [],
-    gt_vs_pred: () => (ds.meta.gt && ds.meta.pred) ? segmentStarts(r => gt(r) !== 'X' && ds.pred(r) !== gt(r)) : [],
     gt_change: () => E.gtChanges, restart: () => E.restartFrames, kick: () => E.list('kick'), referee: () => E.list('referee'),
     lost: () => E.lostStarts, off: () => E.ballOffStarts, jump: () => E.jumpFrames, churn: () => E.churnFrames, dead: () => E.list('dead'),
     ambig: () => segmentStarts(r => alive(r) && ringCount(r) !== -1 && ringCount(r) !== 1),
   };
   const label = {
-    gt_vs_lh: r => `GT ${gt(r)} · L&H ${P.lh[r]}`, gt_vs_pred: r => `GT ${gt(r)} · pred ${ds.pred(r)}`, gt_change: r => `${gt(r - 1)} → ${gt(r)}`,
+    gt_change: r => `${gt(r - 1)} → ${gt(r)}`,
     restart: r => { const f = E.flags.find(x => x.r === r); return f ? f.name : 'GT dead → alive'; }, kick: r => `ball ${ds.ball(r) ? ds.ball(r).sf.toFixed(0) : '?'} m/s`,
     referee: r => { const dets = E.refereeByFrame.get(r) || []; return dets.map(d => `${d.official_id || 'AR'} ${d.signal}`).join(' · ') || 'flag'; },
     lost: r => { let e = r; while (e < ds.n && !ds.ball(e)) e++; return `${((e - r) / ds.fps).toFixed(1)} s`; },
@@ -1069,7 +1240,7 @@ function markCandidate(status) {
 }
 
 // ---------------------------------------------------------------- bookmarks, notes
-function addBookmark() { store.addBookmark(cur, $('#note').value.trim(), { gt: ds.gt(cur) || '', lh: P.lh[cur] }); $('#note').value = ''; noteIndicator(); rowCache.clear(); renderBookmarks(); drawTimeline(); }
+function addBookmark() { store.addBookmark(cur, $('#note').value.trim(), { gt: ds.gt(cur) || '', algs: Object.fromEntries(ALG.on.map(n => [n, algLetter(n, cur)])) }); $('#note').value = ''; noteIndicator(); rowCache.clear(); renderBookmarks(); drawTimeline(); }
 function renderBookmarks() {
   const el = $('#bms'); el.innerHTML = '';
   store.bookmarks.forEach((b, i) => {
@@ -1156,9 +1327,9 @@ function groundCircle(Hm, cx, cy, rm, n = 36) { const o = []; for (let i = 0; i 
 function poly(ctx, pts, close) { ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); if (close) ctx.closePath(); }
 let hitList = [];
 function draw() {
-  if (!ds || !P) return;
+  if (!ds || !ROWS.length) return;
   const ov = $('#ov'), ctx = ov.getContext('2d'); ctx.clearRect(0, 0, ov.width, ov.height);
-  const r = cur, Hm = ds.H(r), b = ds.ball(r), PL = ds.players(r), tp = +$('#rad').value, holder = P.lhPid[r];
+  const r = cur, Hm = ds.H(r), b = ds.ball(r), PL = ds.players(r), tp = +$('#rad').value;
   hitList = []; ctx.lineWidth = 1.2; ctx.font = '500 13px Inter';
   if (!Hm) {
     ctx.fillStyle = 'rgba(240,60,60,.9)'; ctx.font = '500 14px Inter';
@@ -1179,22 +1350,20 @@ function draw() {
     for (const [vr, k] of ds.meta.events.vanish) { const age = (r - vr) / ds.fps; if (age >= 0 && age < 1 && vr > 0) { const a = ds.slot(vr - 1, k); if (a) { const p = ds.proj(Hm, a.x, a.y); ctx.strokeStyle = col('churn'); ctx.globalAlpha = 1 - age; ctx.beginPath(); ctx.arc(p[0], p[1], 8, 0, 7); ctx.stroke(); ctx.fillStyle = col('churn'); ctx.fillText('lost #' + ds.numOf(k), p[0] + 11, p[1] - 10); ctx.globalAlpha = 1; } } }
     for (const [ar, k] of ds.meta.events.appear) { const age = (r - ar) / ds.fps; if (age >= 0 && age < .6) { const a = ds.slot(ar, k); if (a) { ctx.strokeStyle = col('churn'); ctx.globalAlpha = 1 - age / .6; poly(ctx, groundCircle(Hm, a.x, a.y, .5 + 1.5 * age), true); ctx.stroke(); ctx.globalAlpha = 1; } } }
   }
-  let inH = 0, inA = 0; const nearest = { H: null, A: null };
+  let inH = 0, inA = 0;
   if (b) {
-    for (const p of PL) { const d = ds.metres(b, p), s = ds.sideOf(p.k); if (s === 'H' || s === 'A') { if (d <= tp) s === 'H' ? inH++ : inA++; if (!nearest[s] || d < nearest[s].d) nearest[s] = { d, k: p.k, p }; } }
+    for (const p of PL) { const s = ds.sideOf(p.k); if ((s === 'H' || s === 'A') && ds.metres(b, p) <= tp) s === 'H' ? inH++ : inA++; }
     if (layers.ring) { poly(ctx, groundCircle(Hm, b.x, b.y, tp), true); const tint = inH && !inA ? TEAM.H : inA && !inH ? TEAM.A : null; if (tint) { ctx.fillStyle = tint; ctx.globalAlpha = .16; ctx.fill(); ctx.globalAlpha = 1; } ctx.strokeStyle = col('ring'); ctx.stroke(); }
   }
   if (layers.hull) for (const s of ['H', 'A']) { const pts = PL.filter(p => ds.sideOf(p.k) === s).map(p => ds.proj(Hm, p.x, p.y)); if (pts.length >= 3) { const hull = convexHull(pts); ctx.fillStyle = TEAM[s]; ctx.globalAlpha = .08; poly(ctx, hull, true); ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = TEAM[s]; ctx.stroke(); } }
   if (layers.players) for (const p of PL) {
     const [x, y] = ds.proj(Hm, p.x, p.y), s = ds.sideOf(p.k), c = TEAM[s] || '#888';
-    const isHolder = p.k === holder, isPin = pinned.includes(p.k), isHov = hover === p.k;
-    if (isHolder && layers.holder) { ctx.fillStyle = c; ctx.globalAlpha = .38; poly(ctx, groundCircle(Hm, p.x, p.y, .6), true); ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = c; ctx.stroke(); }
+    const isPin = pinned.includes(p.k), isHov = hover === p.k;
     if (isPin) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; poly(ctx, groundCircle(Hm, p.x, p.y, .45), true); ctx.stroke(); ctx.lineWidth = 1.2; const n = Math.round(3 * ds.fps); for (let i = Math.max(1, r - n); i <= r; i++) { const a = ds.slot(i - 1, p.k), d = ds.slot(i, p.k); if (!a || !d) continue; ctx.strokeStyle = c; ctx.globalAlpha = .2 + .6 * (i - (r - n)) / n; poly(ctx, [ds.proj(Hm, a.x, a.y), ds.proj(Hm, d.x, d.y)]); ctx.stroke(); } ctx.globalAlpha = 1; }
     ctx.beginPath(); ctx.arc(x, y, isHov ? 10 : 8, 0, 7); ctx.strokeStyle = '#000'; ctx.lineWidth = 3; ctx.stroke(); ctx.strokeStyle = c; ctx.lineWidth = isHov || isPin ? 2 : 1.2; ctx.stroke(); ctx.lineWidth = 1.2;
-    if (layers.labels || isHolder || isHov || isPin) { let lab = ds.numOf(p.k); if (isHolder && b) lab += '  ' + ds.metres(b, p).toFixed(1) + ' m'; ctx.font = (isHolder ? '600 ' : '500 ') + '12px Inter'; ctx.fillStyle = '#000'; ctx.fillText(lab, x + 11, y - 9); ctx.fillStyle = c; ctx.fillText(lab, x + 10, y - 10); }
+    if (layers.labels || isHov || isPin) { const lab = ds.numOf(p.k); ctx.font = '500 12px Inter'; ctx.fillStyle = '#000'; ctx.fillText(lab, x + 11, y - 9); ctx.fillStyle = c; ctx.fillText(lab, x + 10, y - 10); }
     hitList.push({ x, y, k: p.k });
   }
-  if (b && holder >= 0 && layers.opp) { const os = ds.sideOf(holder) === 'H' ? 'A' : 'H', nn = nearest[os]; if (nn) { const o = ds.proj(Hm, nn.p.x, nn.p.y), bp = ds.proj(Hm, b.x, b.y); ctx.strokeStyle = TEAM[os]; ctx.globalAlpha = .7; poly(ctx, [o, bp]); ctx.stroke(); ctx.globalAlpha = 1; ctx.fillStyle = TEAM[os]; ctx.font = '500 11px Inter'; ctx.fillText(nn.d.toFixed(1) + ' m', (o[0] + bp[0]) / 2 + 4, (o[1] + bp[1]) / 2 - 6); } }
   if (pinned.length === 2) { const a = ds.slot(r, pinned[0]), c = ds.slot(r, pinned[1]); if (a && c) { const pa = ds.proj(Hm, a.x, a.y), pc = ds.proj(Hm, c.x, c.y); ctx.setLineDash([4, 4]); ctx.strokeStyle = '#fff'; poly(ctx, [pa, pc]); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle = '#fff'; ctx.font = '500 12px Inter'; ctx.fillText(ds.metres(a, c).toFixed(1) + ' m', (pa[0] + pc[0]) / 2 + 4, (pa[1] + pc[1]) / 2 - 6); } }
   if (b && layers.ball) { poly(ctx, groundCircle(Hm, b.x, b.y, ds.meta.ball_radius, 16), true); ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke(); ctx.lineWidth = 1.2; const pb = ds.ball(r - 1); if (pb && b.sf > 1) { const c = ds.proj(Hm, b.x, b.y), e = ds.proj(Hm, b.x + (b.x - pb.x) * 10, b.y + (b.y - pb.y) * 10); ctx.strokeStyle = '#fff'; poly(ctx, [c, e]); ctx.stroke(); } }
   if (layers.referee) drawReferee(ctx, r);
@@ -1277,8 +1446,12 @@ function drawPossCard(r, b, tp, inH, inA) {
   const name = { H: 'Barcelona · home', A: 'Athletic · away', D: 'dead ball', X: 'no label' };
   if (g !== null) { let s = r; while (s > 0 && ds.gt(s - 1) === g) s--; html += `<div class="card" style="border-top:3px solid ${TEAM[g]}"><div class="lbl">ground truth</div><div class="big" style="color:${TEAM[g]}">${g}</div><div class="name">${name[g]}</div><div class="sub">held ${((r - s) / ds.fps).toFixed(1)} s</div></div>`; }
   else html += `<div class="card"><div class="lbl">ground truth</div><div class="sub">none on the broadcast timeline</div></div>`;
-  if (ds.meta.pred) { const p = ds.pred(r), ok = p === g; html += `<div class="card" style="border-top:3px solid ${ok ? col('good') : col('bad')}"><div class="lbl">prediction</div><div class="big" style="color:${ok ? col('good') : col('bad')}">${p}</div><div class="sub">${ok ? 'agrees' : 'disagrees'}</div></div>`; }
-  html += `<div class="card"><div class="lbl">heuristics</div><div class="row"><span class="k">naive</span><span class="v" style="color:${TEAM[P.naive[r]]}">${P.naive[r] || '-'}</span></div><div class="row"><span class="k">L&amp;H</span><span class="v" style="color:${TEAM[P.lh[r]]}">${P.lh[r] || '-'}</span></div><div class="row"><span class="k">within ${tp} m</span><span class="v"><span style="color:${TEAM.H}">H ${inH}</span> <span style="color:${TEAM.A}">A ${inA}</span></span></div></div>`;
+  if (ALG.on.length) {
+    const ref = refCodes(), rc = ref ? ref[r] : 0, scored = rc >= 1 && rc <= 3;
+    const rows = ALG.on.map(n => { const l = algLetter(n, r), mark = !scored || n === ALG.ref ? '' : l === RESULT_LABELS[rc] ? `<span style="color:${col('good')}">✓</span>` : `<span style="color:${col('bad')}">✗</span>`; return `<div class="row"><span class="k mono" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${n}</span><span class="v"><b style="color:${TEAM[l] || TEAM.X}">${l || '-'}</b> ${mark}</span></div>`; }).join('');
+    html += `<div class="card"><div class="lbl">algorithms${refName() ? ` <span class="hint" style="text-transform:none;letter-spacing:0">vs ${refName()}</span>` : ''}</div>${rows}</div>`;
+  }
+  html += `<div class="card"><div class="lbl">ring</div><div class="row"><span class="k">within ${tp} m</span><span class="v"><span style="color:${TEAM.H}">H ${inH}</span> <span style="color:${TEAM.A}">A ${inA}</span></span></div></div>`;
   const seg = store.segmentAt(r); if (seg.state !== 'clear') { const dl = store.derivedLabel(r); const it = SCHEMA.state.items.find(i => i[0] === seg.state); html += `<div class="card" style="border-top:3px solid ${TEAM[dl]}"><div class="lbl">my reading</div><div class="big" style="color:${TEAM[dl]}">${dl}</div><div class="sub" style="color:${it[3]}">${it[2]}</div></div>`; }
   el.innerHTML = html;
 }
@@ -1317,7 +1490,7 @@ function updateInfo() {
   if (b) { row('ball', `${b.x.toFixed(3)}, ${b.y.toFixed(3)}${Number.isFinite(b.z) ? ' · z ' + b.z.toFixed(2) + ' m' : ''}`); row('ball speed frames / data', `${fmt(b.sf)} / ${fmt(b.sd)} m/s`); row('ball accel', `${fmt(b.acc)} m/s²`, E.kick.has(r) ? col('kick') : null); } else row('ball', 'not tracked', col('bad'));
   const nH = PL.filter(p => ds.sideOf(p.k) === 'H').length, nA = PL.filter(p => ds.sideOf(p.k) === 'A').length;
   row('tracked', `<span style="color:${TEAM.H}">H ${nH}</span> <span style="color:${TEAM.A}">A ${nA}</span> · ${PL.length}`, PL.length !== 22 ? col('warn') : null);
-  const k = P.lhPid[r]; if (k >= 0 && b) { const hp = ds.slot(r, k); let press = 0; for (const p of PL) if (ds.sideOf(p.k) !== ds.sideOf(k) && ds.metres(hp, p) <= 3) press++; row('L&H holder', `#${ds.numOf(k)} · pressure ${press} opp &lt; 3 m`, TEAM[ds.sideOf(k)]); }
+  if (b) for (const s of ['H', 'A']) { let nn = null; for (const p of PL) if (ds.sideOf(p.k) === s) { const d = ds.metres(b, p); if (!nn || d < nn.d) nn = { d, k: p.k }; } if (nn) row(`nearest ${s}`, `#${ds.numOf(nn.k)} · ${nn.d.toFixed(2)} m`, TEAM[s]); }
   let fast = null; for (const p of PL) if (Number.isFinite(p.sd) && (!fast || p.sd > fast.sd)) fast = p; if (fast) row('fastest', `#${ds.numOf(fast.k)} ${fast.sd.toFixed(1)} m/s${fast.sd > ds.meta.bolt ? ' › Bolt' : ''}`, fast.sd > ds.meta.bolt ? col('bolt') : null);
   if (ds.meta.hom_err) { const e = ds.meta.hom_err[r]; row('homography err', e < 0 ? 'none' : e.toFixed(2), e < 0 || e > 3 ? col('bad') : e > 1 ? col('warn') : col('good')); }
   if (E.dead) { const D = E.dead; row('dead ball (sync)', D.mask[r] ? D.why(r).join(' + ') : !D.covered[r] ? 'alive · no counterpart' : 'alive', D.mask[r] ? TEAM.D : null); }
@@ -1337,8 +1510,22 @@ function buildRows() {
   const grp = (name, rows, opts = {}) => { if (rows.length || opts.forceHeader) ROWS.push({ grp: name, ...opts }); ROWS.push(...rows); };
   const lab = (name, get, cmap = TEAM3) => ({ name, kind: 'label', get, cmap });
   const mask = (name, get, color) => ({ name, kind: 'mask', get, color: hex(color) });
-  const pr = []; if (ds.meta.gt) pr.push(lab('GT', r => ds.gt(r))); if (ds.meta.pred) pr.push(lab('PRED', r => ds.pred(r)));
-  pr.push(lab('NAIVE', r => P.naive[r]), lab('L&H', r => P.lh[r]), { name: 'SEGMENT', kind: 'segment', layer: 'A' }, lab('MINE', r => store.derivedLabel(r)));
+  const pr = []; if (ds.meta.gt) pr.push(lab('GT', r => ds.gt(r)));
+  // one label row per picked algorithm, each followed by its Δ row against the reference
+  ALG.rowNames = new Set();
+  const ref = refCodes(), rn = refName();
+  for (const name of ALG.on) {
+    const a = ALG.loaded.get(name); if (!a) continue;
+    pr.push({ ...lab(name, r => RESULT_LABELS[a.codes[r]]), alg: name, title: `${name} · ${algHint(algMeta(name))}` });
+    ALG.rowNames.add(name);
+    if (!ref || name === ALG.ref) continue;
+    const ag = agreement(a.codes, ref), dn = `Δ ${name}`;
+    pr.push({ name: dn, kind: 'diff', alg: name, get: r => (ref[r] >= 1 && ref[r] <= 3 ? (a.codes[r] === ref[r] ? 1 : 2) : 0),
+      display: `Δ ${name}${ag.share !== null ? ` ${(100 * ag.share).toFixed(0)}%` : ''}`,
+      title: `${name} vs ${rn}: dark green = agree, magenta = share of frames that disagree, on frames ${rn} labels H / A / D` + (ag.share !== null ? ` · ${(100 * ag.share).toFixed(1)}% of ${ag.n} frames over the export` : '') });
+    ALG.rowNames.add(dn);
+  }
+  pr.push({ name: 'SEGMENT', kind: 'segment', layer: 'A' }, lab('MINE', r => store.derivedLabel(r)));
   if (store.layerB.segments.length) pr.push({ name: 'SEGMENT B', kind: 'segment', layer: 'B' });
   grp('possession', pr);
   if (E.dead) {
@@ -1383,10 +1570,11 @@ function buildRows() {
   rowCache.clear();
 }
 function rowStrip(row, r0, r1, W) {
-  const key = [row.name, r0, r1, W, $('#rad').value, store.segments.length, store.points.length, store.bookmarks.length, store.layerB.points.length, pinned.join()].join('|');
+  const key = [row.name, r0, r1, W, ALG.version, store.segments.length, store.points.length, store.bookmarks.length, store.layerB.points.length, pinned.join()].join('|');
   if (rowCache.has(key)) return rowCache.get(key);
   let px;
   if (row.kind === 'label') px = rasterLabel(row.get, r0, r1, W, row.cmap, BG3);
+  else if (row.kind === 'diff') px = rasterDiff(row.get, r0, r1, W, BG3);
   else if (row.kind === 'mask') px = rasterMask(row.get, r0, r1, W, row.color, BG3);
   else if (row.kind === 'int') px = rasterIntensity(row.get, r0, r1, W, row.vmax, row.color, BG3, row.bad ? { bad: row.bad, badColor: hex(col('bad')) } : {});
   else if (row.kind === 'cat') px = rasterCategorical(row.get, r0, r1, W, BG3);
@@ -1398,17 +1586,17 @@ function rowStrip(row, r0, r1, W) {
   for (let i = 0; i < W; i++) { img.data[i * 4] = px[i * 3]; img.data[i * 4 + 1] = px[i * 3 + 1]; img.data[i * 4 + 2] = px[i * 3 + 2]; img.data[i * 4 + 3] = 255; }
   g.putImageData(img, 0, 0); rowCache.set(key, c); if (rowCache.size > 400) rowCache.delete(rowCache.keys().next().value); return c;
 }
-function rowVisible(name) { return !store.rows || store.rows.includes(name) || name.startsWith('#'); }
+function rowVisible(name) { return !store.rows || store.rows.includes(name) || name.startsWith('#') || ALG.rowNames.has(name); }
 function groupVisible(i) { if (ROWS[i].forceHeader) return true; for (let j = i + 1; j < ROWS.length && !ROWS[j].grp; j++) if (rowVisible(ROWS[j].name)) return true; return false; }
 let bands = null, bandBin = 0;
 // about 400 bins across the export, never finer than 2 s
-function ensureBands() { if (bands) return; bandBin = Math.max(ds.fps * 2, Math.round(ds.n / 400)); bands = aggregateBands(ds, E, P, bandBin); }
+function ensureBands() { if (bands) return; bandBin = Math.max(ds.fps * 2, Math.round(ds.n / 400)); bands = aggregateBands(ds, E, bandBin); }
 function setupTimeline() {
   const c = $('#tlc');
   c.addEventListener('mousedown', e => { if (e.offsetY < overviewHeight() + 4) { $('#v').pause(); seek(Math.round(e.offsetX / c.clientWidth * (ds.n - 1))); return; } tlDrag = { x0: e.offsetX, x1: e.offsetX }; });
   window.addEventListener('mousemove', e => { if (!tlDrag) return; const rct = c.getBoundingClientRect(); tlDrag.x1 = e.clientX - rct.left; drawTimeline(); });
   window.addEventListener('mouseup', () => { if (!tlDrag) return; const [a, b] = [tlDrag.x0, tlDrag.x1].sort((x, y) => x - y), W = c.clientWidth; if (b - a < 4) { $('#v').pause(); seek(xToFrame(a, W)); } else { view = [xToFrame(a, W), xToFrame(b, W)]; if (view[1] - view[0] < 10) view[1] = view[0] + 10; buildRows(); } tlDrag = null; drawTimeline(); });
-  c.addEventListener('mousemove', e => { const W = c.clientWidth, r = xToFrame(e.offsetX, W), tip = $('#tip2'); tip.style.display = 'block'; tip.style.left = (e.clientX + 12) + 'px'; tip.style.top = (e.clientY - 70) + 'px'; const b = ds.ball(r), seg = store.segmentAt(r); tip.innerHTML = `<b class="mono">${ds.start + r}</b> · ${(r / ds.fps).toFixed(1)} s<br>GT <b style="color:${TEAM[ds.gt(r) || 'X']}">${ds.gt(r) || '-'}</b> · naive <b style="color:${TEAM[P.naive[r]]}">${P.naive[r] || '-'}</b> · L&amp;H <b style="color:${TEAM[P.lh[r]]}">${P.lh[r] || '-'}</b>${ds.meta.pred ? ` · pred <b style="color:${TEAM[ds.pred(r)]}">${ds.pred(r)}</b>` : ''}${seg.state !== 'clear' ? `<br>mine ${seg.team || '-'} · ${seg.state}` : ''}<br>ball ${b ? b.sf.toFixed(1) + ' m/s' : 'lost'} · tracked ${ds.meta.count[r]}${E.dead && E.dead.mask[r] ? ` · <b style="color:${TEAM.D}">dead ball (sync)</b>` : ''}`; });
+  c.addEventListener('mousemove', e => { const W = c.clientWidth, r = xToFrame(e.offsetX, W), tip = $('#tip2'); tip.style.display = 'block'; tip.style.left = (e.clientX + 12) + 'px'; tip.style.top = (e.clientY - 70) + 'px'; const b = ds.ball(r), seg = store.segmentAt(r); const algTxt = ALG.on.map(n => { const l = algLetter(n, r); return `<span class="mono">${n}</span> <b style="color:${TEAM[l] || TEAM.X}">${l || '-'}</b>`; }).join(' · '); tip.innerHTML = `<b class="mono">${ds.start + r}</b> · ${(r / ds.fps).toFixed(1)} s<br>GT <b style="color:${TEAM[ds.gt(r) || 'X']}">${ds.gt(r) || '-'}</b>${algTxt ? `<br>${algTxt}` : ''}${seg.state !== 'clear' ? `<br>mine ${seg.team || '-'} · ${seg.state}` : ''}<br>ball ${b ? b.sf.toFixed(1) + ' m/s' : 'lost'} · tracked ${ds.meta.count[r]}${E.dead && E.dead.mask[r] ? ` · <b style="color:${TEAM.D}">dead ball (sync)</b>` : ''}`; });
   c.addEventListener('mouseleave', () => $('#tip2').style.display = 'none');
   c.addEventListener('wheel', e => { e.preventDefault(); if (e.shiftKey) { $('#tlbody').scrollTop += e.deltaY || e.deltaX; return; } const W = c.clientWidth, r = xToFrame(e.offsetX, W), span = view[1] - view[0], k = e.deltaY > 0 ? 1.25 : .8, ns = Math.max(10, Math.min(ds.n - 1, span * k)); let a = r - (r - view[0]) * ns / span; a = Math.max(0, Math.min(ds.n - 1 - ns, a)); view = [Math.round(a), Math.round(a + ns)]; buildRows(); drawTimeline(); }, { passive: false });
   new ResizeObserver(drawTimeline).observe($('#tl'));
@@ -1418,7 +1606,7 @@ const frameToX = (r, W) => (r - view[0]) / Math.max(1, view[1] - view[0]) * W;
 function drawTimeline() {
   if (!ROWS.length || document.body.classList.contains('notl')) return; ensureBands();
   const c = $('#tlc'), W = Math.max(50, c.clientWidth), dpr = window.devicePixelRatio || 1;
-  const items = overviewOn().map(n => OVERVIEW_ITEMS.find(i => i.name === n));
+  const all = overviewItems(), items = overviewOn().map(n => all.find(i => i.name === n));
   const ovH = items.reduce((s, it) => s + (it.kind === 'strip' ? OVH : BANDH) + 1, 0);
   const TOP = ovH + 6 + FLAG; let h = TOP;
   ROWS.forEach((r, i) => { if (r.grp) { if (groupVisible(i)) h += GG; } else if (rowVisible(r.name)) h += RH + RG; });
@@ -1426,13 +1614,12 @@ function drawTimeline() {
   g.fillStyle = '#17191c'; g.fillRect(0, 0, W, h);
   // overview: strips and bands over the whole export, in the order the user picked
   const labels = $('#rowlabels'); labels.innerHTML = ''; labels.style.height = h + 'px';
-  const mkLab = (t, yy, cls, onclick, fs) => { const d = document.createElement('div'); d.textContent = t; d.title = t; d.style.top = yy + 'px'; if (fs) d.style.fontSize = fs + 'px'; if (cls) d.className = cls; if (onclick) { d.onclick = onclick; d.style.cursor = 'pointer'; } labels.appendChild(d); };
+  const mkLab = (t, yy, cls, onclick, fs, title) => { const d = document.createElement('div'); d.textContent = t; d.title = title || t; d.style.top = yy + 'px'; if (fs) d.style.fontSize = fs + 'px'; if (cls) d.className = cls; if (onclick) { d.onclick = onclick; d.style.cursor = 'pointer'; } labels.appendChild(d); };
   const nb = bands.length, bw = W / nb; let y = 0;
   for (const it of items) {
     if (it.kind === 'strip') { const row = ROWS.find(r => r.name === it.row); const saved = view; view = [0, ds.n - 1]; g.drawImage(rowStrip(row, 0, ds.n - 1, W), 0, 0, W, 1, 0, y, W, OVH); view = saved; mkLab(it.name, y + 1, 'grp', null, Math.min(10, OVH)); y += OVH + 1; continue; }
     for (const [i, bnd] of bands.entries()) {
-      if (it.key === 'share') { const d = bnd.shareH - bnd.shareA; if (!d) continue; g.fillStyle = d > 0 ? TEAM.H : TEAM.A; g.globalAlpha = Math.min(1, Math.abs(d) * 1.3); }
-      else if (it.count) { if (!bnd[it.key]) continue; g.fillStyle = col(it.color); g.globalAlpha = Math.min(1, 0.5 + bnd[it.key] * 0.25); }
+      if (it.count) { if (!bnd[it.key]) continue; g.fillStyle = col(it.color); g.globalAlpha = Math.min(1, 0.5 + bnd[it.key] * 0.25); }
       else { if (!bnd[it.key]) continue; g.fillStyle = col(it.color); g.globalAlpha = Math.min(1, bnd[it.key] * 1.5); }
       g.fillRect(i * bw, y, Math.max(1, Math.ceil(bw)), BANDH); g.globalAlpha = 1;
     }
@@ -1448,7 +1635,7 @@ function drawTimeline() {
     if (row.grp) { if (groupVisible(i)) { mkLab(row.grp, y + 1, 'grp', row.toggle ? () => { slotsOpen = !slotsOpen; buildRows(); drawTimeline(); } : null); y += GG; } continue; }
     if (!rowVisible(row.name)) continue;
     g.drawImage(rowStrip(row, view[0], view[1], W), 0, 0, W, 1, 0, y, W, RH);
-    mkLab(row.name, y + Math.max(0, (RH - 10) / 2), row.kind === 'slot' && pinned.includes(row.k) ? 'pin' : null, row.kind === 'slot' ? () => { pinned = pinned.includes(row.k) ? [] : [row.k]; renderPinned(); rowCache.clear(); draw(); drawTimeline(); } : null);
+    mkLab(row.display || row.name, y + Math.max(0, (RH - 10) / 2), row.kind === 'slot' && pinned.includes(row.k) ? 'pin' : null, row.kind === 'slot' ? () => { pinned = pinned.includes(row.k) ? [] : [row.k]; renderPinned(); rowCache.clear(); draw(); drawTimeline(); } : null, null, row.title);
     y += RH + RG;
   }
   for (const f of E.flags) { if (f.r < view[0] || f.r > view[1]) continue; const x = frameToX(f.r, W), cc = rgb(f.color); g.strokeStyle = cc; g.globalAlpha = .5; g.beginPath(); g.moveTo(x + .5, yFlag); g.lineTo(x + .5, h); g.stroke(); g.globalAlpha = 1; glyph(g, f.glyph, x, yFlag + 6, 4.5, cc); }
@@ -1475,22 +1662,27 @@ function glyph(g, kind, x, y, r, c, hollow = false) {
   hollow ? g.stroke() : g.fill();
 }
 // ---------------------------------------------------------------- overview filter (S11)
-// which overview items are on, in display order; GT is forced first
-function overviewOn() {
-  const picked = store.overview || OVERVIEW_DEFAULT;
-  const ok = n => { const it = OVERVIEW_ITEMS.find(i => i.name === n); return it && (it.kind !== 'strip' || ROWS.some(r => r.name === it.row)); };
-  return ['GT', ...OVERVIEW_ITEMS.map(i => i.name).filter(n => n !== 'GT' && picked.includes(n))].filter(ok);
+// the fixed items, then a strip per picked algorithm right after GT
+function overviewItems() {
+  const algs = ALG.on.filter(n => ALG.loaded.has(n)).map(n => ({ name: n, kind: 'strip', row: n, alg: true }));
+  return [OVERVIEW_ITEMS[0], ...algs, ...OVERVIEW_ITEMS.slice(1)];
 }
-function overviewHeight() { return overviewOn().reduce((s, n) => s + (OVERVIEW_ITEMS.find(i => i.name === n).kind === 'strip' ? OVH : BANDH) + 1, 0); }
+// which overview items are on, in display order; GT is forced first; algorithm strips are on by default
+function overviewOn() {
+  const picked = store.overview || OVERVIEW_DEFAULT, items = overviewItems();
+  const ok = n => { const it = items.find(i => i.name === n); return it && (it.kind !== 'strip' || ROWS.some(r => r.name === it.row)); };
+  return ['GT', ...items.filter(i => i.name !== 'GT' && (picked.includes(i.name) || (i.alg && !store.overview))).map(i => i.name)].filter(ok);
+}
+function overviewHeight() { const items = overviewItems(); return overviewOn().reduce((s, n) => s + (items.find(i => i.name === n).kind === 'strip' ? OVH : BANDH) + 1, 0); }
 function setupOverviewFilter() {
   const pop = $('#ovpop');
-  $('#bOverview').onclick = e => { e.stopPropagation(); $('#rowpop').style.display = 'none'; pop.style.display = pop.style.display === 'block' ? 'none' : 'block'; renderOverviewPop(); };
+  $('#bOverview').onclick = e => { e.stopPropagation(); $('#rowpop').style.display = 'none'; $('#algpop').style.display = 'none'; pop.style.display = pop.style.display === 'block' ? 'none' : 'block'; renderOverviewPop(); };
   document.addEventListener('click', e => { if (!pop.contains(e.target)) pop.style.display = 'none'; });
 }
 function renderOverviewPop() {
   const pop = $('#ovpop'); pop.innerHTML = '<div class="lbl" style="margin-bottom:6px">overview rows, whole export</div>';
   const on = overviewOn();
-  for (const it of OVERVIEW_ITEMS) {
+  for (const it of overviewItems()) {
     if (it.kind === 'strip' && !ROWS.some(r => r.name === it.row)) continue;
     const l = document.createElement('label'); l.className = 'chk';
     l.innerHTML = `<input type="checkbox" ${on.includes(it.name) ? 'checked' : ''} ${it.name === 'GT' ? 'disabled' : ''}> ${it.name}`;
@@ -1502,7 +1694,7 @@ function renderOverviewPop() {
 }
 // ---------------------------------------------------------------- row filter
 function setupRowFilter() {
-  const pop = $('#rowpop'); $('#bRows').onclick = e => { e.stopPropagation(); $('#ovpop').style.display = 'none'; pop.style.display = pop.style.display === 'block' ? 'none' : 'block'; renderRowPop(); };
+  const pop = $('#rowpop'); $('#bRows').onclick = e => { e.stopPropagation(); $('#ovpop').style.display = 'none'; $('#algpop').style.display = 'none'; pop.style.display = pop.style.display === 'block' ? 'none' : 'block'; renderRowPop(); };
   document.addEventListener('click', e => { if (!pop.contains(e.target)) pop.style.display = 'none'; });
 }
 function renderRowPop() {
@@ -1511,14 +1703,17 @@ function renderRowPop() {
   for (const name in ROW_PRESETS) { const b = document.createElement('button'); b.textContent = name; b.onclick = e => { e.stopPropagation(); store.setRows(ROW_PRESETS[name] ? ROW_PRESETS[name].slice() : null); renderRowPop(); buildLegend(); drawTimeline(); }; pr.appendChild(b); }
   for (const row of ROWS) {
     if (row.grp) { if (row.toggle) continue; const g = document.createElement('div'); g.className = 'lbl grp'; g.textContent = row.grp; pop.appendChild(g); continue; }
-    if (row.kind === 'slot') continue;
+    if (row.kind === 'slot' || row.alg) continue;
     const l = document.createElement('label'); l.className = 'chk'; l.innerHTML = `<input type="checkbox" ${rowVisible(row.name) ? 'checked' : ''}> ${row.name}`;
-    l.querySelector('input').onchange = e => { e.stopPropagation(); const all = ROWS.filter(r => !r.grp && r.kind !== 'slot').map(r => r.name); const cur_ = store.rows ? store.rows.slice() : all.slice(); const i = cur_.indexOf(row.name); if (e.target.checked && i < 0) cur_.push(row.name); if (!e.target.checked && i >= 0) cur_.splice(i, 1); store.setRows(cur_.length === all.length ? null : cur_); buildLegend(); drawTimeline(); };
+    l.querySelector('input').onchange = e => { e.stopPropagation(); const all = ROWS.filter(r => !r.grp && r.kind !== 'slot' && !r.alg).map(r => r.name); const cur_ = store.rows ? store.rows.slice() : all.slice(); const i = cur_.indexOf(row.name); if (e.target.checked && i < 0) cur_.push(row.name); if (!e.target.checked && i >= 0) cur_.splice(i, 1); store.setRows(cur_.length === all.length ? null : cur_); buildLegend(); drawTimeline(); };
     l.onclick = e => e.stopPropagation(); pop.appendChild(l);
   }
 }
 // a small hook so the e2e test can look inside
-window.__pv = { ready: false, overviewOn, rowStrip, rowVisible, get ROWS() { return ROWS; }, get E() { return E; }, video: $('#v'), get ds() { return ds; }, get store() { return store; }, get P() { return P; }, get queue() { return queue; }, get cur() { return cur; }, get view() { return view; }, get pinned() { return pinned; }, get hitList() { return hitList; }, seek, setCandType(t) { candType = t; $('#candType').value = t; buildCandidates(); } };
+window.__pv = { ready: false, overviewOn, rowStrip, rowVisible, get ROWS() { return ROWS; }, get E() { return E; }, video: $('#v'), get ds() { return ds; }, get store() { return store; }, get queue() { return queue; }, get cur() { return cur; }, get view() { return view; }, get pinned() { return pinned; }, get hitList() { return hitList; }, seek, setCandType(t) { candType = t; $('#candType').value = t; buildCandidates(); },
+  algs: { get index() { return ALG.index; }, get on() { return ALG.on.slice(); }, get ref() { return ALG.ref; }, get rowNames() { return ALG.rowNames; }, get error() { return ALG.error; },
+    loaded: name => ALG.loaded.get(name), agreement: algAgreement, refresh: refreshResults, set: setAlgorithms, toggle: toggleAlgorithm, restore: restoreAlgorithms,
+    setRef(ref) { ALG.ref = ref; algsChanged(); }, state: () => ({ on: ALG.on.slice(), ref: ALG.ref }), renderPicker: renderAlgPicker } };
 setupLayout();
 load();
 

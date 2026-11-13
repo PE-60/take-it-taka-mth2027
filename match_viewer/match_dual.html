@@ -50,7 +50,8 @@ body.stacked #panes{grid-template-columns:minmax(0,1fr);grid-template-rows:minma
 #cv{position:relative} #cmpc{display:block;width:100%;cursor:crosshair} #cmpo{position:absolute;left:0;top:0;pointer-events:none}
 #tip{position:fixed;pointer-events:none;background:rgba(15,16,18,.94);border:1px solid var(--line2);border-radius:6px;padding:6px 9px;font-size:12px;display:none;z-index:9;white-space:nowrap}
 .pop{position:absolute;top:100%;margin-top:4px;max-height:60vh;overflow:auto;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:10px 12px;display:none;z-index:8;min-width:280px;box-shadow:0 8px 24px rgba(0,0,0,.5);white-space:normal}
-#rowpop{right:0;bottom:100%;top:auto;margin:0 0 4px} #anchorpop{position:fixed;top:48px;right:auto}
+#rowpop,#algpop{right:0;bottom:100%;top:auto;margin:0 0 4px} #anchorpop{position:fixed;top:48px;right:auto}
+.tool{display:inline-flex;align-items:center;border:1px solid var(--line2);border-radius:5px;background:var(--panel2);cursor:pointer;font-size:12px}
 .pop .grp{margin:8px 0 2px}
 .chk{display:flex;align-items:center;gap:7px;padding:2px 0;cursor:pointer}
 .arow{display:grid;grid-template-columns:1fr auto auto auto auto;gap:6px;align-items:center;padding:3px 0;border-bottom:1px solid var(--line)}
@@ -93,6 +94,7 @@ body.stacked #panes{grid-template-columns:minmax(0,1fr);grid-template-rows:minma
     <span class="sp"></span>
     <button id="bPins" title="Smart Tagging restarts (SET PIECES): a filled pin at the start of each tag, a hollow one at its end">restart pins</button>
     <span class="lbl">row h</span><input type="range" id="rowH" min="6" max="28" step="1" value="12" style="width:70px">
+    <button id="bAlgs" title="possession algorithms from evaluation/results/*.csv, on the tactical timeline, against the ground truth or each other">algorithms ▾</button><div id="algpop" class="pop"></div>
     <button id="bRows">rows ▾</button><div id="rowpop" class="pop"></div>
   </div>
   <div id="cmpbody"><div id="labels"></div><div id="lblSplit"></div><div id="cv"><canvas id="cmpc"></canvas><canvas id="cmpo"></canvas></div></div>
@@ -113,14 +115,15 @@ const LS = {
 };
 const KEY = 'pv:dual:' + q.get('t') + '|' + q.get('b');
 const RG = 2, GG = 10, OVH = 14;
-const DEFAULT_ROWS = ['GT', 'PRED', 'NAIVE', 'L&H', 'DEAD BALL', 'RESTART', 'KICK', 'BALL LOST', 'BALL OFF PITCH', 'BALL SPEED', 'COUNT ≠ 22', 'HOMOGRAPHY'];
-const DEFAULT_PAIRS = [['L&H', 'L&H'], ['GT', 'L&H']];
+// algorithm rows (picked under "algorithms ▾", from evaluation/results/) are shown whatever the preset
+const DEFAULT_ROWS = ['GT', 'DEAD BALL', 'RESTART', 'KICK', 'BALL LOST', 'BALL OFF PITCH', 'BALL SPEED', 'COUNT ≠ 22', 'HOMOGRAPHY'];
+const DEFAULT_PAIRS = [];
 const DEAD_ROWS = ['DEAD BALL', 'DEAD (BASELINE)', 'NO VIEW (HOM ∅ ∩ ≠22)', 'BALL LOST T∩B', 'NO COUNTERPART', 'OFF PITCH T (ELSE B)', 'STILL-BALL GAP'];
 const PRESETS = {
-  possession: ['GT', 'PRED', 'NAIVE', 'L&H', 'SEGMENT', 'MINE', 'RESTART', 'KICK'],
+  possession: ['GT', 'SEGMENT', 'MINE', 'RESTART', 'KICK'],
   'dead ball': ['GT', ...DEAD_ROWS, 'RESTART', 'BALL LOST', 'BALL OFF PITCH', 'COUNT ≠ 22', 'HOMOGRAPHY'],
   'data quality': ['BALL LOST', 'BALL OFF PITCH', 'BALL SPEED', 'BALL JUMP', 'PLAYER JUMP', 'DROPOUT <0.5 s', 'VANISH/APPEAR', 'COUNT ≠ 22', '› BOLT', 'HOMOGRAPHY'],
-  minimal: ['GT', 'L&H', 'BALL LOST', 'HOMOGRAPHY'],
+  minimal: ['GT', 'BALL LOST', 'HOMOGRAPHY'],
 };
 
 function fail(msg) { const e = $('#err'); e.innerHTML = msg; e.style.display = 'block'; }
@@ -191,7 +194,7 @@ function openPane(p) {
       const done = () => { p.win = w; p.pv = w.__pv; p.v = w.__pv.video; p.ds = w.__pv.ds; res(p); };
       if (w.__pv && w.__pv.ready) done(); else w.addEventListener('pv:ready', done, { once: true });
     }, { once: true });
-    p.frame.src = 'match_viewer.html?embed=1&d=' + encodeURIComponent(p.dir);
+    p.frame.src = 'match_viewer.html?embed=1&d=' + encodeURIComponent(p.dir) + (q.get('deadball') ? '&deadball=' + encodeURIComponent(q.get('deadball')) : '');
   });
 }
 function setNocp(p, on) { p.el.querySelector('.nocp').style.display = on ? 'block' : 'none'; }
@@ -269,7 +272,7 @@ function deadBallNote() {
   const warn = (text, title) => ` · <span style="color:var(--warn)" title="${title}">${text}</span>`;
   const hint = 'run: python dead_ball_investigation/run.py --from-exports, then reload';
   const Es = [panes.t, panes.b].map(p => p.pv && p.pv.E).filter(Boolean);
-  if (!Es.some(E => E.dead)) return warn('no dead-ball rows', `${(Es.find(E => E.deadMissing) || {}).deadMissing || 'no export/dead_ball.json'}; ${hint}`);
+  if (!Es.some(E => E.dead)) return warn('no dead-ball rows', `${(Es.find(E => E.deadMissing) || {}).deadMissing || 'no dead_ball_investigation/dead_ball.json'}; ${hint}`);
   if (deadBallStale()) return warn('dead-ball rows use other anchors', `dead_ball.json was computed with other sync anchors; ${hint}`);
   if (Es.every(E => !E.dead || !E.deadStarts.length)) return warn('0 dead-ball intervals', `dead_ball.json has no intervals inside these exports; ${hint}`);
   return '';
@@ -376,8 +379,9 @@ function lanes() {
   const ds = pairs.map(pr => ({ pr, ra: rowOf(panes.t, pr[0]), rb: rowOf(panes.b, pr[1]) })).filter(x => x.ra && x.rb && x.ra.kind === 'label' && x.rb.kind === 'label');
   if (ds.length) { out.push({ grp: 'compare' }); for (const x of ds) out.push({ kind: 'diff', ...x }); }
   let g = null;
+  const algRows = panes.t.pv.algs.rowNames;
   for (const [name, grp] of names) {
-    if (!selected.includes(name)) continue;
+    if (!selected.includes(name) && !algRows.has(name)) continue;
     if (grp !== g) { out.push({ grp }); g = grp; }
     const ra = rowOf(panes.t, name), rb = rowOf(panes.b, name), key = UNION_ROWS[name];
     if (key && ra && rb && panes.t.pv.E[key] && panes.b.pv.E[key]) out.push({ kind: 'union', name, key, color: ra.color });
@@ -475,7 +479,7 @@ function redraw() {
     const ly = y + Math.max(0, (RH - 10) / 2);
     if (l.kind === 'union') { drawUnionLane(g, l, y, W); mk(`<span class="tagT">T</span>∪<span class="tagB">B</span> ${l.name}`, ly, null, `${l.name} on either video, mapped through the sync: blue = tactical only, orange = broadcast only, the row colour = both`); }
     else if (l.kind === 'diff') { drawDiffLane(g, l, y, W); mk(`<span class="tagD">Δ</span> <span class="tagT">T</span> ${l.pr[0]} · <span class="tagB">B</span> ${l.pr[1]}` + (l.agree !== null ? ` <span style="color:var(--fg)">${(l.agree * 100).toFixed(0)}%</span>` : ''), ly, null, `T ${l.pr[0]} vs B ${l.pr[1]}: dark green = agree, magenta = share of frames that disagree, ${l.agree !== null ? (l.agree * 100).toFixed(1) + '% agreement in view' : 'no overlap in view'}`); }
-    else { drawRowLane(g, l, y, W); mk(`<span class="tag${l.pane.toUpperCase()}">${l.pane.toUpperCase()}</span> ${l.name}`, ly, null, `${NAME[l.pane]} · ${l.name}`); }
+    else { drawRowLane(g, l, y, W); mk(`<span class="tag${l.pane.toUpperCase()}">${l.pane.toUpperCase()}</span> ${l.row.display || l.name}`, ly, null, `${NAME[l.pane]} · ${l.row.title || l.name}`); }
     y += RH + RG;
   }
   if (pins) drawPins(g, pinY, h, W);
@@ -544,8 +548,9 @@ function renderRowPop() {
   add.innerHTML = `<select>${lab('t').map(n => `<option>${n}</option>`).join('')}</select><span class="hint">vs</span><select>${lab('b').map(n => `<option>${n}</option>`).join('')}</select><button>+ add</button>`;
   const [sa, sb] = add.querySelectorAll('select'); add.querySelector('button').onclick = e => { e.stopPropagation(); pairs.push([sa.value, sb.value]); LS.set(KEY + ':pairs', pairs); renderRowPop(); redraw(); };
   pop.appendChild(add);
-  let g = null;
+  let g = null; const algRows = panes.t.pv.algs.rowNames;
   for (const [n, grp] of names) {
+    if (algRows.has(n)) continue;
     if (grp !== g) { const h = document.createElement('div'); h.className = 'lbl grp'; h.textContent = grp; pop.appendChild(h); g = grp; }
     const has = ['t', 'b'].filter(id => rowOf(panes[id], n)).map(id => `<span class="tag${id.toUpperCase()}">${id.toUpperCase()}</span>`).join('');
     const l = document.createElement('label'); l.className = 'chk'; l.innerHTML = `<input type="checkbox" ${selected.includes(n) ? 'checked' : ''}> ${n} <span style="margin-left:auto">${has}</span>`;
@@ -595,6 +600,8 @@ async function boot() {
   // a saved row choice predates these rows: show each once, then leave the choice alone
   for (const [seen, name] of [['deadSeen', 'DEAD BALL'], ['offSeen', 'BALL OFF PITCH']])
     if (rowOf(panes.t, name) && !LS.get(KEY + ':' + seen, false)) { if (!selected.includes(name)) selected.push(name); LS.set(KEY + ':' + seen, true); LS.set(KEY + ':rows', selected); }
+  // algorithms live in the tactical pane (their CSVs are on its frames); the broadcast pane gets none
+  await panes.t.pv.algs.restore(LS.get(KEY + ':algs', null));
   ref = LS.get(KEY + ':axis', 't'); $('#axis').value = ref; view = fullRange();
   loadRestarts(); pinsOn = LS.get(KEY + ':pins', true);
   const pinBtn = () => { const b = $('#bPins'); b.className = pinsOn && RESTARTS.length ? 'on' : ''; b.disabled = !RESTARTS.length; if (!RESTARTS.length) b.title = 'no SET PIECES smart tags in the tactical export'; };
@@ -608,8 +615,10 @@ async function boot() {
   $('#bAnchor').onclick = () => { const T = curAbs(panes.t), B = curAbs(panes.b); addAnchor(T, B, `manual @ ${fmtT(T)}`); setLinked(true); };
   $('#bAnchors').onclick = e => { e.stopPropagation(); const p = $('#anchorpop'), r = e.target.getBoundingClientRect(); p.style.left = Math.max(8, r.right - 420) + 'px'; p.style.display = p.style.display === 'block' ? 'none' : 'block'; renderAnchors(); };
   $('#anchorpop').onclick = e => e.stopPropagation();
-  $('#bRows').onclick = e => { e.stopPropagation(); const p = $('#rowpop'); p.style.display = p.style.display === 'block' ? 'none' : 'block'; renderRowPop(); };
-  document.addEventListener('click', () => { $('#rowpop').style.display = 'none'; $('#anchorpop').style.display = 'none'; });
+  $('#bRows').onclick = e => { e.stopPropagation(); $('#algpop').style.display = 'none'; const p = $('#rowpop'); p.style.display = p.style.display === 'block' ? 'none' : 'block'; renderRowPop(); };
+  const algs = panes.t.pv.algs, algPop = $('#algpop'), renderAlgs = () => algs.renderPicker(algPop, { onChange: () => { LS.set(KEY + ':algs', algs.state()); redraw(); } });
+  $('#bAlgs').onclick = e => { e.stopPropagation(); $('#rowpop').style.display = 'none'; const open = algPop.style.display !== 'block'; algPop.style.display = open ? 'block' : 'none'; if (open) { renderAlgs(); algs.refresh().then(() => { if (algPop.style.display === 'block') renderAlgs(); }); } };
+  document.addEventListener('click', () => { $('#rowpop').style.display = 'none'; $('#algpop').style.display = 'none'; $('#anchorpop').style.display = 'none'; });
   $('#axis').onchange = e => { ref = e.target.value; LS.set(KEY + ':axis', ref); view = fullRange(); redraw(); };
   document.addEventListener('keydown', e => {
     if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;

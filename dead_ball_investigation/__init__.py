@@ -7,7 +7,7 @@
               2. the tactical ball off the pitch is dead (the broadcast's where the tactical ball is missing)
               3. a gap between dead intervals in which the ball stays still is dead
 
-    python dead_ball_investigation/run.py        # -> match_viewer/export/dead_ball.json
+    python dead_ball_investigation/run.py        # -> dead_ball_investigation/dead_ball.json
 """
 
 import os

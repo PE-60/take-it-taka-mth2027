@@ -24,10 +24,14 @@ Interactive viewer (match_viewer.html next to this script; exports go to match_v
     python match_viewer.py --dual --mode full --export --serve     # export both, sync, open
     python match_viewer.py --dual --mode full --serve              # reuse existing exports and sync file
     python match_viewer.py --dual --serve --resync                 # recompute export/sync.json first
-    python match_viewer.py --dual --serve --dead-ball              # force-recompute export/dead_ball.json first
-                                                                   # (done anyway when it is missing or stale)
+    python match_viewer.py --dual --serve --dead-ball              # force-recompute dead_ball_investigation/dead_ball.json
+                                                                   # first (done anyway when it is missing or stale)
 
-Dead-ball rows (both viewers): export/dead_ball.json, from `python dead_ball_investigation/run.py`
+Dead-ball rows (both viewers): dead_ball_investigation/dead_ball.json, from `python dead_ball_investigation/run.py`
+
+Possession rows (both viewers): the page's "algorithms ▾" button adds any of evaluation/results/*.csv
+(written by `python possesion_algorithms/run.py ...`, or any other submission file) as timeline rows,
+compared with each other and with the ground truth. The viewer itself computes no possession.
 
 AR flag overlays (optional): put referee_signals_tactical.json in match_viewer/export/
 (or pass --referee-signals PATH). Built by: python -m referee_signals --video ... (from the repo root)
@@ -74,6 +78,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 if REPO not in sys.path:
     sys.path.insert(0, REPO)                  # referee_signals/ lives at the repo root
+DEAD_BALL_JSON = os.path.join(REPO, "dead_ball_investigation", "dead_ball.json")
+RESULTS_DIR = os.path.join(REPO, "evaluation", "results")
+RESULTS_INDEX = "__results__.json"            # served next to the pages: the CSVs in RESULTS_DIR
 # where to look for the data: this folder, the repo root above it, and MTAH_DATA_DIR if set
 SEARCH_ROOTS = [HERE, REPO] + ([os.environ["MTAH_DATA_DIR"]] if os.environ.get("MTAH_DATA_DIR") else [])
 PITCH_M = (105.3, 68.0)                      # metres, from games.py
@@ -624,54 +631,6 @@ def metres(a, b):
 
 
 # ----------------------------------------------------------------------------
-# possession heuristics, after Link & Hoernig (2017)
-#   naive : the nearest player, if within T_P of the ball
-#   L&H   : naive gain, kept while the 1 s-ahead ball prediction stays within T_A of the
-#           holder's 1 s-ahead position; a kick (accel >= 4 m/s^2) re-opens the gain test
-# ----------------------------------------------------------------------------
-def compute_possession(atd, meta, home, t_p, t_a=2.5, horizon_s=1.0):
-    n = len(atd["ball"])
-    xy, ball = atd["xy"], atd["ball"]
-    M = np.array(PITCH_M, dtype=np.float32)
-    side_of = np.array([team_colour(pid, meta, home)[1] for pid in atd["ids"]])
-    naive = np.full(n, "", dtype="<U1")
-    naive_pid = np.full(n, -1, int)
-    lh = np.full(n, "", dtype="<U1")
-    lh_pid = np.full(n, -1, int)
-    holder, last_team = -1, ""
-    h = int(horizon_s * FPS)
-    for r in range(n):
-        if not np.isfinite(ball[r, 0]):
-            holder = -1
-            lh[r] = last_team                         # team is sticky through tracking loss
-            continue
-        d = np.hypot(*((xy[r, :, :2] - ball[r, :2]) * M).T)
-        d = np.where(np.isfinite(d), d, np.inf)
-        k = int(np.argmin(d))
-        if d[k] <= t_p:
-            naive[r], naive_pid[r] = side_of[k], k
-        # L&H: does the current holder keep the ball?
-        if holder >= 0 and np.isfinite(xy[r, holder, 0]):
-            r2 = min(n - 1, r + h)
-            if np.isfinite(ball[r2, 0]) and np.isfinite(xy[r2, holder, 0]):
-                dist_future = float(np.hypot(*((ball[r2, :2] - xy[r2, holder, :2]) * M)))
-            else:
-                dist_future = d[holder]
-            if dist_future > t_a or (atd["kick"][r] and d[k] <= t_p and k != holder):
-                holder = -1
-        else:
-            holder = -1
-        if holder < 0 and d[k] <= t_p:
-            holder = k
-        if holder >= 0:
-            last_team, lh_pid[r] = side_of[holder], holder
-        lh[r] = last_team                             # challenge rule: a loose ball stays with the last team
-    print(f"possession heuristics: naive covers {100 * (naive != '').mean():.0f}% of frames, "
-          f"L&H covers {100 * (lh != '').mean():.0f}%")
-    return {"naive": naive, "naive_pid": naive_pid, "lh": lh, "lh_pid": lh_pid}
-
-
-# ----------------------------------------------------------------------------
 # Smart Tagging (SportsCode XML, seconds from video start)
 # ----------------------------------------------------------------------------
 def tag_side(team_text):
@@ -710,7 +669,7 @@ def tag_line(e):
 # Design rules, after Omnioculars (Chen et al., IEEE VIS 2022) and iBall (Chen et al., CHI 2023):
 #   * keep the pitch clear: numbers live in a courtside band at the top, overview at the bottom
 #   * anything data-bearing on the pitch is anchored to the ground under its player
-#   * highlight only the key actors (ball carrier, closest opponent); everyone else is a bare mark
+#   * players are bare marks; the ball and the ring around it carry the proximity readout
 #   * one key stat per on-pitch element; the rest goes to the panels
 #   * one hue per team for every team-related mark; data-quality and events use their own hues
 # ----------------------------------------------------------------------------
@@ -866,7 +825,7 @@ class Band:
             yy += self.h_row + self.gap
 
 
-def draw_minimap(img, tx, u, players, ball, meta, home, radius, x, y, w, h, carrier=None, hull=False, regions=True):
+def draw_minimap(img, tx, u, players, ball, meta, home, radius, x, y, w, h, hull=False, regions=True):
     panel(img, x, y, w, h, 0.85)
     ix, iy, iw, ih = x + int(8 * u), y + int(8 * u), w - int(16 * u), h - int(16 * u)
     lc = (75, 120, 75)
@@ -899,8 +858,7 @@ def draw_minimap(img, tx, u, players, ball, meta, home, radius, x, y, w, h, carr
     pts = {"H": [], "A": []}
     for pid, p in players.items():
         col, side = team_colour(pid, meta, home)
-        r = max(2, int(4 * u)) if pid == carrier else max(1, int(2.5 * u))
-        cv2.circle(img, to_px(p), r, col, -1, cv2.LINE_AA)
+        cv2.circle(img, to_px(p), max(1, int(2.5 * u)), col, -1, cv2.LINE_AA)
         if side in pts:
             pts[side].append(to_px(p))
     if hull:
@@ -917,7 +875,7 @@ def draw_minimap(img, tx, u, players, ball, meta, home, radius, x, y, w, h, carr
 # ----------------------------------------------------------------------------
 # timeline: GT strip + event rows
 # ----------------------------------------------------------------------------
-def build_timeline(gt, pred, tags, atd, poss, hom, start, end, width):
+def build_timeline(gt, pred, tags, atd, hom, start, end, width):
     """Returns (groups, flags). groups: [(group_name, [(row_name, strip)])]; flags: [(frame, colour, label)]."""
     n = end - start + 1
     cols = np.linspace(start, end + 1, width + 1).astype(int)
@@ -972,9 +930,6 @@ def build_timeline(gt, pred, tags, atd, poss, hom, start, end, width):
             flags.append((start + i, EV_RESTART, "GT alive", "tri_up"))
     if pred:
         rows.append(("PRED", label_strip(np.array([pred.get(f, "X") for f in range(start, end + 1)]), cmap)))
-    if poss:
-        rows.append(("NAIVE", label_strip(poss["naive"], cmap)))
-        rows.append(("L&H", label_strip(poss["lh"], cmap)))
     if rows:
         groups.append(("POSSESSION", rows))
 
@@ -1056,7 +1011,7 @@ def build_timeline(gt, pred, tags, atd, poss, hom, start, end, width):
 # ----------------------------------------------------------------------------
 # export for the interactive viewer (match_viewer.html)
 # ----------------------------------------------------------------------------
-def export_data(out_dir, src, video, start, end, fps, W, Hh, gt, pred, tags, atd, meta, home, hom, poss, flags,
+def export_data(out_dir, src, video, start, end, fps, W, Hh, gt, tags, atd, meta, home, hom, flags,
                 referee_doc=None):
     os.makedirs(out_dir, exist_ok=True)
     n = end - start + 1
@@ -1103,7 +1058,6 @@ def export_data(out_dir, src, video, start, end, fps, W, Hh, gt, pred, tags, atd
         "home_dir": atd.get("home_dir", 0) if atd else 0,
         "halves": {str(k): list(v) for k, v in (HALVES or {}).items()},
         "gt": "".join(gt.get(f, "X") for f in range(start, end + 1)) if gt else None,
-        "pred": "".join(pred.get(f, "X") for f in range(start, end + 1)) if pred else None,
         "tags": [{"a": e["a"], "b": e["b"], "code": e["code"], "team": e["tags"].get("Team"), "type": e["tags"].get("Type"),
                   "side": e["side"], "restart": (list(restart_type(e)) if e["code"].upper().startswith("SET PIECE") else None)}
                  for e in tags if e["b"] >= start and e["a"] <= end],
@@ -1149,18 +1103,37 @@ def export_relpath(source, mode):
     return f"export/{source}_{'full' if source == 'broadcast' else mode}"
 
 
-def server_root():
-    """The folder the server has to serve from: the common parent of this script and the video.
-    Written by --export into export/latest.json; defaults to this folder."""
-    try:
-        with open(os.path.join(HERE, "export", "latest.json")) as fh:
-            j = json.load(fh)
-        root = j.get("root")
-        if root and os.path.isdir(root):
-            return root
-    except (OSError, ValueError):
-        pass
-    return HERE
+def server_root(*video_dirs):
+    """The folder the server has to serve from: the common parent of the repo root (the pages,
+    dead_ball_investigation/ and evaluation/results/) and the video folders. Without video folders,
+    the root --export wrote into export/latest.json; defaults to the repo root."""
+    if not video_dirs:
+        try:
+            with open(os.path.join(HERE, "export", "latest.json")) as fh:
+                root = json.load(fh).get("root")
+            if root and os.path.isdir(root):
+                video_dirs = (root,)
+        except (OSError, ValueError):
+            pass
+    return os.path.commonpath([REPO, *video_dirs])
+
+
+def results_index():
+    """The submission CSVs in evaluation/results/ for the pages' algorithm picker: name, URL relative
+    to this folder, size, mtime, and the <name>.meta.json sidecar possesion_algorithms writes."""
+    out = []
+    for path in sorted(glob.glob(os.path.join(RESULTS_DIR, "*.csv"))):
+        name = os.path.splitext(os.path.basename(path))[0]
+        meta = None
+        try:
+            with open(os.path.join(RESULTS_DIR, name + ".meta.json")) as fh:
+                meta = json.load(fh)
+        except (OSError, ValueError):
+            pass
+        st = os.stat(path)
+        out.append({"name": name, "url": os.path.relpath(path, HERE).replace(os.sep, "/"),
+                    "size": st.st_size, "mtime": st.st_mtime, "meta": meta})
+    return out
 
 
 def pick_port(preferred, host="127.0.0.1", span=50):
@@ -1211,6 +1184,17 @@ def serve(root, port, export_dir=None, page="match_viewer.html", query=None):
             # pages and sidecars change between runs; without this the browser keeps serving old copies
             self.send_header("Cache-Control", "no-cache")
             super().end_headers()
+
+        def do_GET(self):
+            if urllib.parse.urlsplit(self.path).path.endswith("/" + RESULTS_INDEX):
+                body = json.dumps(results_index()).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            super().do_GET()
 
         def send_head(self):
             path = self.translate_path(self.path)
@@ -1314,7 +1298,7 @@ def run_dual(args):
             print("warning: synchronize_videos.py failed; the viewer starts unsynchronised "
                   "(line both videos up by hand and press 'anchor here')")
     dead_ball_run = os.path.join(REPO, "dead_ball_investigation", "run.py")
-    dead_ball_json = os.path.join(HERE, "export", "dead_ball.json")
+    dead_ball_json = DEAD_BALL_JSON
     inputs = [sync_path] + [os.path.join(HERE, d, f) for d in (tac_dir, br_dir) for f in ("meta.json", "data.bin")]
     inputs += glob.glob(os.path.join(os.path.dirname(dead_ball_run), "*.py"))
     dead_ball_age = os.path.getmtime(dead_ball_json) if os.path.isfile(dead_ball_json) else None
@@ -1326,7 +1310,7 @@ def run_dual(args):
         print("warning: no dead-ball rows: they need a sync file")
     elif args.dead_ball or dead_ball_stale:
         why = "--dead-ball" if args.dead_ball else "missing" if dead_ball_age is None else "older than the sync file, the exports or the dead_ball_investigation code"
-        print(f"\n=== dead_ball_investigation -> export/dead_ball.json ({why}) ===")
+        print(f"\n=== dead_ball_investigation -> {os.path.relpath(dead_ball_json, REPO)} ({why}) ===")
         r = subprocess.run([sys.executable, dead_ball_run, "--sync", sync_path, "--from-exports",
                             "--tactical-export", tac_dir, "--broadcast-export", br_dir, "--out", dead_ball_json])
         if r.returncode != 0:
@@ -1340,8 +1324,7 @@ def run_dual(args):
     for d in (tac_dir, br_dir):
         with open(os.path.join(HERE, d, "meta.json")) as fh:
             videos.append(os.path.dirname(os.path.abspath(os.path.join(HERE, json.load(fh)["video"]))))
-    root = os.path.commonpath([HERE, *videos])
-    serve(root, args.port, page="match_dual.html", query=query)
+    serve(server_root(*videos), args.port, page="match_dual.html", query=query)
 
 
 # ----------------------------------------------------------------------------
@@ -1363,8 +1346,8 @@ def main():
     ap.add_argument("--sync", help="--dual: sync file from synchronize_videos.py (default export/sync.json)")
     ap.add_argument("--resync", action="store_true", help="--dual: rerun synchronize_videos.py even if the sync file exists")
     ap.add_argument("--dead-ball", action="store_true",
-                    help="--dual: recompute export/dead_ball.json even if it is newer than the sync file and the exports "
-                         "(it is recomputed automatically when missing or older)")
+                    help="--dual: recompute dead_ball_investigation/dead_ball.json even if it is newer than the sync "
+                         "file and the exports (it is recomputed automatically when missing or older)")
     ap.add_argument("--dir", help="export folder to open (e.g. export/broadcast_full). "
                     "With --serve, also implied by --source/--mode when those flags are passed")
     ap.add_argument("--video")
@@ -1373,7 +1356,8 @@ def main():
     ap.add_argument("--atd-meta")
     ap.add_argument("--homography")
     ap.add_argument("--tags")
-    ap.add_argument("--pred")
+    ap.add_argument("--pred", help="rendered video only: a frame,label CSV shown as PRED "
+                                   "(in the viewer pages, use the algorithms ▾ button instead)")
     ap.add_argument("--out")
     ap.add_argument("--start", type=int)
     ap.add_argument("--end", type=int)
@@ -1419,6 +1403,9 @@ def main():
     tags_path = None if (args.no_tags or broadcast) else (args.tags or find_file("*smart_tagging*.xml", required=False, source=src))
     if broadcast and args.pred:
         print("--pred ignored: submissions are indexed to the tactical video, not the broadcast")
+        args.pred = None
+    if args.export and args.pred:
+        print("--pred is not exported: add evaluation/results/*.csv with the page's algorithms ▾ button")
         args.pred = None
 
     referee_doc = None
@@ -1504,18 +1491,17 @@ def main():
     gap = max(3, int(8 * u))
     top_y, top_h = m, int(150 * u)
     # bottom band: timeline rows (left) + minimap (right)
-    poss = compute_possession(atd, meta, home, args.radius) if atd else None
     tl_h, tl_gap, grp_gap = max(5, int(12 * u)), max(1, int(2 * u)), max(3, int(8 * u))
     mm_w, mm_h = int(250 * u), int(162 * u)
     tl_label_w = int(110 * u)
     tl_x = m + tl_label_w
     tl_w = out_w - m - mm_w - gap - tl_x if (atd and not args.no_minimap) else out_w - m - tl_x
-    tl_groups, tl_flags = build_timeline(gt, pred, tags, atd, poss, hom, start, end, tl_w) if not args.no_timeline else ([], [])
+    tl_groups, tl_flags = build_timeline(gt, pred, tags, atd, hom, start, end, tl_w) if not args.no_timeline else ([], [])
     if args.export:
         out_dir = os.path.join(HERE, "export", f"{src}_{'full' if broadcast else args.mode}")
-        export_data(out_dir, src, video, start, end, src_fps, W, Hh, gt, pred, tags, atd, meta, home, hom, poss, tl_flags,
+        export_data(out_dir, src, video, start, end, src_fps, W, Hh, gt, tags, atd, meta, home, hom, tl_flags,
                     referee_doc=referee_doc)
-        root = os.path.commonpath([HERE, os.path.dirname(os.path.abspath(video))])
+        root = server_root(os.path.dirname(os.path.abspath(video)))
         rel = os.path.relpath(out_dir, HERE).replace(os.sep, "/")
         with open(os.path.join(HERE, "export", "latest.json"), "w") as fh:
             json.dump({"dir": rel, "root": root}, fh)
@@ -1612,7 +1598,6 @@ def main():
         # proximity: who is close to the ball, per team
         inside = {"H": 0, "A": 0}
         nearest = {"H": None, "A": None}
-        carrier = None
         if ball is not None:
             for pid, p in players.items():
                 d = metres(ball, p)
@@ -1622,12 +1607,6 @@ def main():
                         inside[side] += 1
                     if nearest[side] is None or d < nearest[side][0]:
                         nearest[side] = (d, pid, p[2], p[3])
-            r0 = f - atd["first"]
-            k = poss["lh_pid"][r0] if poss else -1
-            carrier = atd["ids"][k] if k >= 0 else None
-            opp_side = None
-            if carrier is not None:
-                opp_side = "A" if sides[carrier][1] == "H" else "H"
             trail.append(ball)
         else:
             trail.append(None)
@@ -1721,7 +1700,7 @@ def main():
                     else:
                         cv2.polylines(frame, [rp.astype(np.int32).reshape(-1, 1, 2)], True, RING, t1, cv2.LINE_AA)
 
-            # players: bare marks; ball carrier gets a ground disc; closest opponent gets a line to the ball
+            # players: bare marks with their slot numbers
             if players:
                 pids = list(players)
                 px = project(Hm, [players[p][:2] for p in pids]) * s
@@ -1734,23 +1713,9 @@ def main():
                     c = (int(cx), int(cy))
                     if side in hull_pts:
                         hull_pts[side].append(c)
-                    if pid == carrier:
-                        gp = ground_circle(Hm, players[pid][:2], 0.6) * s
-                        if good_px(gp):
-                            fill_poly_alpha(frame, gp, col, 0.38, outline=col, thick=t1)
                     cv2.circle(frame, c, r, BLACK, t2 + 1, cv2.LINE_AA)
                     cv2.circle(frame, c, r, col, t1, cv2.LINE_AA)
-                    lab = slot_label(pid, meta)
-                    if pid == carrier and ball is not None:
-                        lab = f"{lab}  {metres(ball, players[pid]):.1f} m"
-                    tx.put(lab, c[0] + r + 3, c[1] - r - int(12 * u), int(11 * u), col, "bold" if pid == carrier else "regular")
-                if ball is not None and carrier is not None and opp_side and nearest[opp_side]:
-                    d, opid, _, _ = nearest[opp_side]
-                    op = project(Hm, players[opid][:2])[0] * s
-                    bp0 = project(Hm, ball)[0] * s
-                    if good_px(op) and good_px(bp0):
-                        line_alpha(frame, tuple(op.astype(int)), tuple(bp0.astype(int)), sides[opid][0], 0.7, t1)
-                        tx.put(f"{d:.1f} m", (op[0] + bp0[0]) / 2 + 4, (op[1] + bp0[1]) / 2 - int(14 * u), int(10 * u), sides[opid][0])
+                    tx.put(slot_label(pid, meta), c[0] + r + 3, c[1] - r - int(12 * u), int(11 * u), col)
                 if args.shape:
                     for side, col in (("H", HOME), ("A", AWAY)):
                         if len(hull_pts[side]) >= 3:
@@ -1829,11 +1794,6 @@ def main():
                     nn = nearest[side]
                     if nn:
                         rows.append((f"nearest {side}   #{slot_label(nn[1], meta)}   {nn[0]:.2f} m", col))
-                opp_near = 0
-                if carrier is not None:
-                    cside = sides[carrier][1]
-                    opp_near = sum(1 for pid, p in players.items() if sides[pid][1] not in (cside, "?") and metres(players[carrier], p) <= 3.0)
-                    rows.append((f"holder #{slot_label(carrier, meta)}   pressure {opp_near} opp < 3 m", sides[carrier][0]))
                 zrow = atd["ball"][f - atd["first"], 3] if atd["has_z"] else np.nan
                 z = ball_zone(ball, hdir)
                 ztxt = f"   z {zrow:.2f} m" if np.isfinite(zrow) else ""
@@ -1944,7 +1904,7 @@ def main():
                 lx += int(13 * u) + tx.width(name, int(10 * u)) + int(12 * u)
         if atd and not args.no_minimap:
             draw_minimap(frame, tx, u, players, ball, meta, home, args.radius,
-                         out_w - m - mm_w, out_h - m - mm_h, mm_w, mm_h, carrier=carrier, hull=args.shape,
+                         out_w - m - mm_w, out_h - m - mm_h, mm_w, mm_h, hull=args.shape,
                          regions=not args.no_regions)
 
         frame = tx.flush(frame)

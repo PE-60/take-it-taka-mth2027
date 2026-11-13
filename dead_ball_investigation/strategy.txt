@@ -95,6 +95,7 @@ For the L&H algo:
     Add info from smart tags!!!
     Check when ball is outside of the field using tactical (and broadcast maybe? when tactical is missing) - this should fix missing throw ins.
     For sure add a padding to the coords: don't count d-ball if cooords >= 1 + 0.002 and only for less than 1s
+    Deadball_investigatopn remains the same. New folder - possesion_algorithms - going to contain different possesion algorithms. Each algorithm should be able to specify: 1. if it should run with deadball intervals in mind (i.e. only label possesion on non-deadball intervals, or on the whole video); 2. if it should use tactical video, or synchronized broadcast, or tactical and fallback to synced broadcast; 3. should output a .csv file correctly formatted in evaluation/results; 4. make match viewer (and dual match viewer) such that in the loaded html web page, on the timeline section I can add any (and however much I want) algorithms for comparison with oneanother and with the ground truth.
 TODO: 
     Finalize dead ball:
 
@@ -106,7 +107,19 @@ TODO:
 
     When assessing short possesion intervals, check at the begining and end of the intervals, the ball has some acceleration, depicting a kick - if not, do not count it as a change of possesion, because it may be that the ball is in the air and its projection passes near an opposing team's player (could also happen on the ground, if the ball passes near a player and they don't catch it)   
 
-    Deadball_investigatopn remains the same. New folder - possesion_algorithms - going to contain different possesion algorithms. Each algorithm should be able to specify: 1. if it should run with deadball intervals in mind (i.e. only label possesion on non-deadball intervals, or on the whole video); 2. if it should use tactical video, or synchronized broadcast, or tactical and fallback to synced broadcast; 3. should output a .csv file correctly formatted in evaluation/results; 4. make match viewer (and dual match viewer) such that in the loaded html web page, on the timeline section I can add any (and however much I want) algorithms for comparison with oneanother and with the ground truth.
+    Algorithms:
+        LH_V2:
+            Look at velocity changes (not speed!) and look at the nearest player to the ball around time the velocity change of the ball happened.
+            Apply retention test to gains - the current approach has a look-ahead for keeping the ball, but it should also perform a look-ahead for gaining the ball
+            Require evidence of a touch - look at velocity changes, not just accelaration (i.e. change of speed!)
+            Optionals:
+                Make switching between teams harder than switching within a team - penalize possesion changes
+                Smoothing with a switching penalty 
+        
+        LH_V3:
+            As previous version, but in addition:
+            Make the radius t_p dynamic
+            Look at the player movement around the ball - are the nearest players trying to run to the ball (i.e. somthing like their convex hull gets smaller with the ball inside the hull) or are they not running towards the ball (i.e. area of convex hull stays roughly the same) - this could indicate wrong ball tracking: players are playing for the ball somewhere else, not where the homography tells us.
 
 
 
