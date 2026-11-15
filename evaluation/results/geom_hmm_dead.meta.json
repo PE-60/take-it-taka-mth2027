@@ -1,0 +1,56 @@
+{
+ "name": "geom_hmm_dead",
+ "algorithm": "geom_hmm_dead",
+ "class": "GeometryHMMDeadBall",
+ "description": "geom_hmm fit/decoded on each alive interval of dead_ball.json; D on dead balls; tactical",
+ "dead_ball": true,
+ "source": "tactical",
+ "params": {
+  "n_anti": 3,
+  "n_sym": 3,
+  "var_frac": 0.9,
+  "n_iter": 20,
+  "sticky_s": 15.0,
+  "fit_stride": 5,
+  "min_spell_s": 0.0,
+  "repair_gk": true,
+  "with_dead": false,
+  "ground_deadzone": 0.4,
+  "restart_prior": true,
+  "restart_peek_s": 0.6,
+  "poss_features": "control_gap,lead_gap"
+ },
+ "created": "2026-11-13T19:29:25",
+ "inputs": {
+  "tactical": {
+   "from": "raw data",
+   "path": "data/tactical/BAR-ATH_tactical_atd.txt",
+   "frames": [
+    0,
+    199318
+   ]
+  },
+  "dead_ball": {
+   "path": "dead_ball_investigation/dead_ball.json",
+   "frames": 106889,
+   "created": null
+  }
+ },
+ "frames": 199319,
+ "covered": 199319,
+ "labelled_runs": 110,
+ "from_broadcast": 0,
+ "counts": {
+  "H": 47025,
+  "A": 45405,
+  "D": 106889,
+  "X": 0
+ },
+ "public_gt": {
+  "gt": "BAR-ATH_possession_gt_public.csv",
+  "spell_f1_mean": 0.29743589743589743,
+  "macro_f1": 0.7518448461388946,
+  "accuracy": 0.734,
+  "n_graded": 7500
+ }
+}

@@ -13,6 +13,10 @@
 `label` sees one stretch of frames at a time and starts from scratch on each: the whole covered
 video, or with dead_ball = True each alive interval on its own. Frames the source has no data for
 are never passed in and come out X.
+
+Algorithms that learn something from the whole match (the unsupervised ones) override `prepare`,
+which the runner calls once with the complete tracking and a mask of the rows `label` will see,
+before any `label` call.
 """
 
 from __future__ import annotations
@@ -89,6 +93,11 @@ class PossessionAlgorithm:
         if self.source not in SOURCES:
             raise ValueError(f"{self.name}: source must be one of {SOURCES}, got {self.source!r}")
         self.params = {**type(self).params, **params}
+
+    def prepare(self, track: Tracking, live: np.ndarray | None = None) -> None:
+        """Optional one-off pass over the whole covered tracking before `label` is called on its
+        pieces. `live` (track.n,) marks the rows that will be labelled (all of them when None).
+        The default does nothing; algorithms that fit a model on the match override it."""
 
     def label(self, track: Tracking) -> np.ndarray:
         """One label per frame of `track`: 'H', 'A', 'D' or 'X' ('' counts as X)."""

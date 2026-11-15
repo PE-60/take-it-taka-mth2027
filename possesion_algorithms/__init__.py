@@ -17,15 +17,19 @@ on their timeline, to compare them with each other and with the ground truth.
 
     python possesion_algorithms/run.py --list
     python possesion_algorithms/run.py --all --from-exports
+    python possesion_algorithms/inspect_geom_hmm.py --synthetic          # no match data
+    python possesion_algorithms/inspect_geom_hmm.py --from-exports       # real match + public GT
     python -m unittest discover possesion_algorithms/tests
 
 What is here:
-    base.py        PossessionAlgorithm, Tracking (what label() gets), the source names
-    inputs.py      loading tracking (raw files or viewer exports), sync, dead-ball mask
-    runner.py      labelling a match, writing / validating / scoring the CSV
-    run.py         the command line
-    algorithms/    link_hoernig.py: lh (the viewer's old L&H row) and its dead-ball / broadcast variants
+    base.py          PossessionAlgorithm, Tracking (what label() gets), the source names
+    inputs.py        loading tracking (raw files or viewer exports), sync, dead-ball mask
+    runner.py        labelling a match, writing / validating / scoring the CSV
+    run.py           the command line
+    algorithms/      lh / lh_v2 heuristics, and geom_hmm (unsupervised geometry HMM)
+    unsupervised/    features, anomaly, pca, hmm, synthetic — building blocks for geom_hmm
 """
+
 
 from possesion_algorithms import paths  # noqa: F401  (puts the repo root on sys.path)
 from possesion_algorithms.base import (BROADCAST, SOURCES, TACTICAL, TACTICAL_THEN_BROADCAST,  # noqa: F401

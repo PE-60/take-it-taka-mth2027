@@ -1300,7 +1300,7 @@ const RESTART_GLYPHS = { 'Throw-In': ['diamond', col('throw')], 'Corner': ['circ
 function buildLegend() {
   const el = $('#legend'); el.innerHTML = '';
   const items = [['tri_up', col('good'), 'GT dead → alive', 'RESTART'], ...Object.entries(RESTART_GLYPHS).map(([n, [g, c]]) => [g, c, n.toLowerCase(), 'RESTART']), ['pin', '#fff', 'bookmark', 'BOOKMARK'],
-    [null, col('kick'), 'kick', 'KICK'], [null, col('lost'), 'ball lost', 'BALL LOST'], [null, col('off'), 'ball off pitch', 'BALL OFF PITCH'], [null, col('jump'), 'teleport', 'PLAYER JUMP'], [null, col('churn'), 'vanish / appear', 'VANISH/APPEAR'], [null, col('bolt'), `› Bolt ${ds.meta.bolt} m/s`, '› BOLT'], [null, TEAM.H, 'Barcelona', 'GT'], [null, TEAM.A, 'Athletic', 'GT'], [null, TEAM.D, 'dead ball', 'GT']];
+    [null, col('kick'), 'kick (‖Δv_xy‖ peak ≥ 4)', 'KICK'], [null, col('lost'), 'ball lost', 'BALL LOST'], [null, col('off'), 'ball off pitch', 'BALL OFF PITCH'], [null, col('jump'), 'teleport', 'PLAYER JUMP'], [null, col('churn'), 'vanish / appear', 'VANISH/APPEAR'], [null, col('bolt'), `› Bolt ${ds.meta.bolt} m/s`, '› BOLT'], [null, TEAM.H, 'Barcelona', 'GT'], [null, TEAM.A, 'Athletic', 'GT'], [null, TEAM.D, 'dead ball', 'GT']];
   if (E.dead) items.push([null, col('dbview'), 'no view: broadcast hom ∅ ∩ ≠22', 'NO VIEW (HOM ∅ ∩ ≠22)'], [null, col('dbball'), 'ball lost T∩B', 'BALL LOST T∩B'],
     [null, col('off'), 'off pitch: tactical ball, else broadcast', 'OFF PITCH T (ELSE B)'],
     [null, col('dbstill'), 'gap with the ball still', 'STILL-BALL GAP'], [null, col('dbbase'), 'dead ball before steps 1-3', 'DEAD (BASELINE)']);

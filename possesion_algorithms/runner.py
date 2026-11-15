@@ -47,6 +47,10 @@ def label_match(algo: PossessionAlgorithm, inputs: MatchInputs) -> tuple[np.ndar
     labels = np.full(n, "X", dtype="<U1")
     track = inputs.tracking(algo.source)
     runs = inputs.runs(track, algo.dead_ball)
+    live = np.zeros(track.n, bool)
+    for a, b in runs:
+        live[a:b] = True
+    algo.prepare(track, live)
     for a, b in runs:
         part = track.slice(a, b)
         labels[part.start:part.start + part.n] = clean_labels(algo.label(part), part.n, algo.name)

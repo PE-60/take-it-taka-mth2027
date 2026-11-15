@@ -121,6 +121,13 @@ TODO:
             Make the radius t_p dynamic
             Look at the player movement around the ball - are the nearest players trying to run to the ball (i.e. somthing like their convex hull gets smaller with the ball inside the hull) or are they not running towards the ball (i.e. area of convex hull stays roughly the same) - this could indicate wrong ball tracking: players are playing for the ball somewhere else, not where the homography tells us.
 
+        General_recommendations:
+            Look who has the ball after a deadball interval -> before the deadball interval possesion most likely is of the opposing team
+            A player is usually stationary after they kick the ball
+
+        Own algorithm:
+
+
 
 
 DOCUMENTATION TODO:

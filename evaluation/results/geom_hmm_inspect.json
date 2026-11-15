@@ -1,0 +1,542 @@
+{
+  "window": {
+    "start": 11185,
+    "stop": 18685
+  },
+  "diag": {
+    "n_ball_anomalies": 2002,
+    "n_player_anomaly_slots": 40,
+    "gk_flips": [],
+    "n_anti": 1,
+    "n_sym": 3,
+    "n_states": 2,
+    "counts": {
+      "H": 47005,
+      "A": 45425,
+      "D": 0,
+      "": 106889
+    },
+    "poss_mean": 0.0033757217686749353,
+    "poss_std": 0.6762216520811629
+  },
+  "anomaly": {
+    "graded_frames": 7500,
+    "ball_anomaly_on_graded": 0,
+    "ball_anomaly_rate_graded": 0.0,
+    "gk_flips": [],
+    "n_ball_anomalies_track": 2002
+  },
+  "axis": {
+    "mean_H": 0.06216756095066398,
+    "mean_A": -0.39327197472278796,
+    "gap_H_minus_A": 0.45543953567345197,
+    "corr_signed_gt": 0.38842709598067116,
+    "sign_accuracy": 0.6388362885178172,
+    "likely_flipped": false,
+    "n_graded_HA": 5809
+  },
+  "confusion_HA": {
+    "n": 6031,
+    "accuracy_HA": 0.6184712319681644,
+    "cells": {
+      "gtH_predH": 1987,
+      "gtH_predA": 1369,
+      "gtH_predD": 98,
+      "gtH_predX": 0,
+      "gtH_predblank": 0,
+      "gtA_predH": 710,
+      "gtA_predA": 1743,
+      "gtA_predD": 124,
+      "gtA_predX": 0,
+      "gtA_predblank": 0
+    }
+  },
+  "scores": {
+    "geom_hmm": {
+      "spell_f1": 0.1096774193548387,
+      "macro_f1": 0.7008722106765367,
+      "accuracy": 0.6685333333333333,
+      "n_graded": 7500,
+      "confusion": [
+        [
+          1987,
+          1369,
+          98,
+          0
+        ],
+        [
+          710,
+          1743,
+          124,
+          0
+        ],
+        [
+          48,
+          137,
+          1284,
+          0
+        ],
+        [
+          44260,
+          42176,
+          105383,
+          0
+        ]
+      ]
+    },
+    "near_gap_only": {
+      "spell_f1": 0.24000000000000005,
+      "macro_f1": 0.8133743511607823,
+      "accuracy": 0.8041333333333334,
+      "n_graded": 7500,
+      "confusion": [
+        [
+          2618,
+          738,
+          98,
+          0
+        ],
+        [
+          324,
+          2129,
+          124,
+          0
+        ],
+        [
+          145,
+          40,
+          1284,
+          0
+        ],
+        [
+          39828,
+          46608,
+          105383,
+          0
+        ]
+      ]
+    },
+    "poss_axis_flipped": {
+      "spell_f1": 0.058064516129032254,
+      "macro_f1": 0.5128280270333158,
+      "accuracy": 0.4484,
+      "n_graded": 7500,
+      "confusion": [
+        [
+          1369,
+          1987,
+          98,
+          0
+        ],
+        [
+          1743,
+          710,
+          124,
+          0
+        ],
+        [
+          137,
+          48,
+          1284,
+          0
+        ],
+        [
+          42176,
+          44260,
+          105383,
+          0
+        ]
+      ]
+    },
+    "lh_dead": {
+      "spell_f1": 0.3076923076923077,
+      "macro_f1": 0.8289364248083756,
+      "accuracy": 0.8161333333333334,
+      "n_graded": 7500,
+      "confusion": [
+        [
+          2702,
+          569,
+          98,
+          85
+        ],
+        [
+          265,
+          2135,
+          124,
+          53
+        ],
+        [
+          56,
+          129,
+          1284,
+          0
+        ],
+        [
+          44478,
+          34109,
+          105383,
+          7849
+        ]
+      ]
+    }
+  },
+  "anti_features_ranked": [
+    {
+      "name": "spread_diff",
+      "anti": true,
+      "needs_ball": false,
+      "mean_H": 5.496379375457764,
+      "mean_A": -4.917057514190674,
+      "gap": 10.413436889648438,
+      "corr": 0.7141280908534938,
+      "n_H": 3356,
+      "n_A": 2453,
+      "finite_frac": 1.0
+    },
+    {
+      "name": "near_gap",
+      "anti": true,
+      "needs_ball": true,
+      "mean_H": 4.09238862991333,
+      "mean_A": -2.3557803630828857,
+      "gap": 6.448168992996216,
+      "corr": 0.5550111628609786,
+      "n_H": 3355,
+      "n_A": 2097,
+      "finite_frac": 0.9404404404404404
+    },
+    {
+      "name": "near_soft",
+      "anti": true,
+      "needs_ball": true,
+      "mean_H": 0.28775086998939514,
+      "mean_A": -0.21301399171352386,
+      "gap": 0.500764861702919,
+      "corr": 0.5360527292288425,
+      "n_H": 3355,
+      "n_A": 2097,
+      "finite_frac": 0.9404404404404404
+    },
+    {
+      "name": "converge",
+      "anti": true,
+      "needs_ball": true,
+      "mean_H": -0.45687365531921387,
+      "mean_A": 0.6025209426879883,
+      "gap": -1.0593945980072021,
+      "corr": -0.4316529778672089,
+      "n_H": 3355,
+      "n_A": 2097,
+      "finite_frac": 0.9404404404404404
+    },
+    {
+      "name": "ball_territory",
+      "anti": true,
+      "needs_ball": true,
+      "mean_H": -13.845035552978516,
+      "mean_A": 1.705782175064087,
+      "gap": -15.550817728042603,
+      "corr": -0.31277502011185904,
+      "n_H": 3355,
+      "n_A": 2097,
+      "finite_frac": 0.9404404404404404
+    },
+    {
+      "name": "team_motion",
+      "anti": true,
+      "needs_ball": false,
+      "mean_H": 0.312717467546463,
+      "mean_A": -0.5825126767158508,
+      "gap": 0.8952301442623138,
+      "corr": 0.28813413247557973,
+      "n_H": 3356,
+      "n_A": 2453,
+      "finite_frac": 1.0
+    },
+    {
+      "name": "ball_motion",
+      "anti": true,
+      "needs_ball": true,
+      "mean_H": 1.0280009508132935,
+      "mean_A": -1.985741376876831,
+      "gap": 3.0137423276901245,
+      "corr": 0.22064712576054252,
+      "n_H": 3353,
+      "n_A": 2093,
+      "finite_frac": 0.9394394394394394
+    },
+    {
+      "name": "line_diff",
+      "anti": true,
+      "needs_ball": false,
+      "mean_H": -10.38271713256836,
+      "mean_A": -4.5255208015441895,
+      "gap": -5.85719633102417,
+      "corr": -0.07163614713180586,
+      "n_H": 3356,
+      "n_A": 2453,
+      "finite_frac": 1.0
+    },
+    {
+      "name": "territory",
+      "anti": true,
+      "needs_ball": false,
+      "mean_H": -4.142498970031738,
+      "mean_A": -4.2570366859436035,
+      "gap": 0.11453771591186523,
+      "corr": 0.032362727797762184,
+      "n_H": 3356,
+      "n_A": 2453,
+      "finite_frac": 1.0
+    }
+  ],
+  "all_features": [
+    {
+      "name": "near_gap",
+      "anti": true,
+      "needs_ball": true,
+      "mean_H": 4.09238862991333,
+      "mean_A": -2.3557803630828857,
+      "gap": 6.448168992996216,
+      "corr": 0.5550111628609786,
+      "n_H": 3355,
+      "n_A": 2097,
+      "finite_frac": 0.9404404404404404
+    },
+    {
+      "name": "near_soft",
+      "anti": true,
+      "needs_ball": true,
+      "mean_H": 0.28775086998939514,
+      "mean_A": -0.21301399171352386,
+      "gap": 0.500764861702919,
+      "corr": 0.5360527292288425,
+      "n_H": 3355,
+      "n_A": 2097,
+      "finite_frac": 0.9404404404404404
+    },
+    {
+      "name": "converge",
+      "anti": true,
+      "needs_ball": true,
+      "mean_H": -0.45687365531921387,
+      "mean_A": 0.6025209426879883,
+      "gap": -1.0593945980072021,
+      "corr": -0.4316529778672089,
+      "n_H": 3355,
+      "n_A": 2097,
+      "finite_frac": 0.9404404404404404
+    },
+    {
+      "name": "ball_motion",
+      "anti": true,
+      "needs_ball": true,
+      "mean_H": 1.0280009508132935,
+      "mean_A": -1.985741376876831,
+      "gap": 3.0137423276901245,
+      "corr": 0.22064712576054252,
+      "n_H": 3353,
+      "n_A": 2093,
+      "finite_frac": 0.9394394394394394
+    },
+    {
+      "name": "ball_territory",
+      "anti": true,
+      "needs_ball": true,
+      "mean_H": -13.845035552978516,
+      "mean_A": 1.705782175064087,
+      "gap": -15.550817728042603,
+      "corr": -0.31277502011185904,
+      "n_H": 3355,
+      "n_A": 2097,
+      "finite_frac": 0.9404404404404404
+    },
+    {
+      "name": "territory",
+      "anti": true,
+      "needs_ball": false,
+      "mean_H": -4.142498970031738,
+      "mean_A": -4.2570366859436035,
+      "gap": 0.11453771591186523,
+      "corr": 0.032362727797762184,
+      "n_H": 3356,
+      "n_A": 2453,
+      "finite_frac": 1.0
+    },
+    {
+      "name": "line_diff",
+      "anti": true,
+      "needs_ball": false,
+      "mean_H": -10.38271713256836,
+      "mean_A": -4.5255208015441895,
+      "gap": -5.85719633102417,
+      "corr": -0.07163614713180586,
+      "n_H": 3356,
+      "n_A": 2453,
+      "finite_frac": 1.0
+    },
+    {
+      "name": "spread_diff",
+      "anti": true,
+      "needs_ball": false,
+      "mean_H": 5.496379375457764,
+      "mean_A": -4.917057514190674,
+      "gap": 10.413436889648438,
+      "corr": 0.7141280908534938,
+      "n_H": 3356,
+      "n_A": 2453,
+      "finite_frac": 1.0
+    },
+    {
+      "name": "team_motion",
+      "anti": true,
+      "needs_ball": false,
+      "mean_H": 0.312717467546463,
+      "mean_A": -0.5825126767158508,
+      "gap": 0.8952301442623138,
+      "corr": 0.28813413247557973,
+      "n_H": 3356,
+      "n_A": 2453,
+      "finite_frac": 1.0
+    },
+    {
+      "name": "ball_speed",
+      "anti": false,
+      "needs_ball": true,
+      "mean_H": 1.8288887739181519,
+      "mean_A": 1.9098848104476929,
+      "gap": -0.08099603652954102,
+      "corr": -0.058071763829537895,
+      "n_H": 3353,
+      "n_A": 2093,
+      "finite_frac": 0.9394394394394394
+    },
+    {
+      "name": "ball_accel",
+      "anti": false,
+      "needs_ball": true,
+      "mean_H": 2.0289618968963623,
+      "mean_A": 1.9644153118133545,
+      "gap": 0.06454658508300781,
+      "corr": 0.039376068885049416,
+      "n_H": 3351,
+      "n_A": 2088,
+      "finite_frac": 0.9382716049382716
+    },
+    {
+      "name": "ball_speed_1s",
+      "anti": false,
+      "needs_ball": true,
+      "mean_H": 1.8300904035568237,
+      "mean_A": 1.9004476070404053,
+      "gap": -0.07035720348358154,
+      "corr": -0.04730232913776306,
+      "n_H": 3345,
+      "n_A": 2032,
+      "finite_frac": 0.9279279279279279
+    },
+    {
+      "name": "near_min",
+      "anti": false,
+      "needs_ball": true,
+      "mean_H": 2.5439069271087646,
+      "mean_A": 2.5881383419036865,
+      "gap": -0.044231414794921875,
+      "corr": -0.005463184340566753,
+      "n_H": 3355,
+      "n_A": 2097,
+      "finite_frac": 0.9404404404404404
+    },
+    {
+      "name": "converge_all",
+      "anti": false,
+      "needs_ball": true,
+      "mean_H": 0.8188631534576416,
+      "mean_A": 1.0946259498596191,
+      "gap": -0.27576279640197754,
+      "corr": -0.16829812900401322,
+      "n_H": 3355,
+      "n_A": 2097,
+      "finite_frac": 0.9404404404404404
+    },
+    {
+      "name": "ball_off_pitch",
+      "anti": false,
+      "needs_ball": true,
+      "mean_H": 0.0,
+      "mean_A": 0.0,
+      "gap": 0.0,
+      "corr": -0.016707994224671483,
+      "n_H": 3351,
+      "n_A": 2088,
+      "finite_frac": 0.9382716049382716
+    },
+    {
+      "name": "ball_missing",
+      "anti": false,
+      "needs_ball": false,
+      "mean_H": 0.0014898688532412052,
+      "mean_A": 0.1487973928451538,
+      "gap": -0.1473075239919126,
+      "corr": -0.29802023695723706,
+      "n_H": 3356,
+      "n_A": 2453,
+      "finite_frac": 1.0
+    },
+    {
+      "name": "players_moving",
+      "anti": false,
+      "needs_ball": false,
+      "mean_H": 2.1823298931121826,
+      "mean_A": 2.5319664478302,
+      "gap": -0.3496365547180176,
+      "corr": -0.21547837760781904,
+      "n_H": 3356,
+      "n_A": 2453,
+      "finite_frac": 1.0
+    },
+    {
+      "name": "n_present",
+      "anti": false,
+      "needs_ball": false,
+      "mean_H": 0.9804691672325134,
+      "mean_A": 0.9838528037071228,
+      "gap": -0.003383636474609375,
+      "corr": 0.001694251697388983,
+      "n_H": 3356,
+      "n_A": 2453,
+      "finite_frac": 1.0
+    },
+    {
+      "name": "spread_sum",
+      "anti": false,
+      "needs_ball": false,
+      "mean_H": 40.874088287353516,
+      "mean_A": 39.134498596191406,
+      "gap": 1.7395896911621094,
+      "corr": 0.2841181891929924,
+      "n_H": 3356,
+      "n_A": 2453,
+      "finite_frac": 1.0
+    },
+    {
+      "name": "centroid_gap",
+      "anti": false,
+      "needs_ball": false,
+      "mean_H": 10.563424110412598,
+      "mean_A": 10.672285079956055,
+      "gap": -0.10886096954345703,
+      "corr": -0.015728190726938866,
+      "n_H": 3356,
+      "n_A": 2453,
+      "finite_frac": 1.0
+    }
+  ],
+  "timeline": "gt   AAAAAAAHHHHHHHHAAAHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHAAAAAAAADDDDDHHHHHHHH\npred HHHAAAAAAAAAAAAAAAAAAAAAAAAHAAHAAAHHHAAAAHAAAAAHHHAAHHHHHHHHHHAAAADDDDDDDDHHHHHA\naxis ................................................................................\n      (1 char = 25 frames \u2248 1.0s; + = poss\u22650 \u2192 model H)",
+  "verdict": [
+    "Strongest anti feature on this window: spread_diff (corr=0.714, gap=10.413).",
+    "near_gap corr=0.555; compare scores['near_gap_only'] vs scores['geom_hmm'] \u2014 if near_gap wins, averaging anti features hurts.",
+    "near_gap-only sticky decode beats full geom_hmm on spellF1 (anti-mean is diluting the local ball cue)."
+  ]
+}
