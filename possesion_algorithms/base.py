@@ -43,6 +43,7 @@ class Tracking:
     team    (S,)       'H', 'A' or '?' per slot
     kick    (n,)       ball acceleration peak >= 4 m/s² (match_viewer's KICK row)
     origin  (n,)       ORIGIN code of the recording each frame comes from, -1 where there is none
+    slot_ids (S,)      ATD tracker ids per slot when known (e.g. "24"); None if unknown
 
     A slot is a tracklet of one recording, not a person. With both recordings, the broadcast's
     slots come after the tactical ones, so a slot index never jumps between recordings.
@@ -55,6 +56,7 @@ class Tracking:
     origin: np.ndarray
     pitch: tuple
     fps: float = 25.0
+    slot_ids: np.ndarray | None = None
 
     @property
     def n(self) -> int:
@@ -67,7 +69,7 @@ class Tracking:
     def slice(self, a: int, b: int) -> "Tracking":
         """Rows a .. b - 1 (relative to start)."""
         return Tracking(self.start + a, self.ball[a:b], self.xy[a:b], self.team, self.kick[a:b],
-                        self.origin[a:b], self.pitch, self.fps)
+                        self.origin[a:b], self.pitch, self.fps, self.slot_ids)
 
     def ball_distances(self) -> np.ndarray:
         """(n, S) ball-to-slot distance in metres, inf where the ball or the slot is missing."""

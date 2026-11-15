@@ -10,6 +10,7 @@ if REPO not in sys.path:
 
 from dead_ball_investigation.paths import DEAD_BALL_JSON, EXPORT_DIR, VIEWER_DIR  # noqa: E402,F401
 from dead_ball_investigation.sync import DEFAULT_SYNC  # noqa: E402,F401
+from data_correction.goalkeeper_trackers.paths import GOALKEEPER_CSV  # noqa: E402,F401
 
 RESULTS_DIR = os.path.join(REPO, "evaluation", "results")
 EVALUATION_DIR = os.path.join(REPO, "evaluation")

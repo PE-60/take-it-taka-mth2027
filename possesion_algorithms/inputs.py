@@ -35,6 +35,7 @@ class SourceTrack:
     pitch: tuple
     fps: float = 25.0
     origin_path: str = ""
+    slot_ids: np.ndarray | None = None
 
     @property
     def n(self) -> int:
@@ -55,8 +56,9 @@ def load_raw(source: str) -> SourceTrack:
     print(f"--- {source}: parsing {os.path.relpath(atd_raw)} (frames 0..{n - 1})")
     atd, players_meta, home = mv.load_atd(atd_raw, atd_meta, 0, n - 1)
     team = np.array([mv.team_colour(pid, players_meta, home)[1] for pid in atd["ids"]], dtype="<U1")
+    slot_ids = np.asarray([str(pid) for pid in atd["ids"]], dtype=object)
     return SourceTrack(source, 0, atd["ball"][:, :2], atd["xy"][:, :, :2], team, np.asarray(atd["kick"], bool),
-                       tuple(mv.PITCH_M), float(mv.FPS), atd_raw)
+                       tuple(mv.PITCH_M), float(mv.FPS), atd_raw, slot_ids)
 
 
 def resolve_export(path: str) -> str:
@@ -102,8 +104,9 @@ def load_export(path: str) -> SourceTrack:
     kick = np.zeros(n, bool)
     rows = np.asarray((meta.get("events") or {}).get("kick") or [], dtype=np.int64)
     kick[rows[(rows >= 0) & (rows < n)]] = True
+    slot_ids = np.asarray([str(s.get("id") or "") for s in meta["slots"]], dtype=object)
     return SourceTrack(meta.get("source", TACTICAL), int(meta["start"]), data[:, 9:11].copy(), xy, team, kick,
-                       tuple(meta["pitch"]), float(meta.get("fps", 25.0)), path)
+                       tuple(meta["pitch"]), float(meta.get("fps", 25.0)), path, slot_ids)
 
 
 def _runs(mask):
@@ -130,7 +133,7 @@ def compose(n_frames: int, parts, fps: float = 25.0) -> Tracking:
     xy = np.full((m, S, 2), np.nan, np.float32)
     kick = np.zeros(m, bool)
     origin = np.full(m, -1, np.int8)
-    team, off, pitch = [], 0, None
+    team, slot_ids, off, pitch = [], [], 0, None
     for t, rows, take in parts:
         s = t.xy.shape[1]
         sel = np.flatnonzero((take & (rows >= 0))[lo:hi])
@@ -141,9 +144,14 @@ def compose(n_frames: int, parts, fps: float = 25.0) -> Tracking:
         kick[sel] = t.kick[r]
         origin[sel] = ORIGIN[t.source]
         team.extend(t.team.tolist())
+        if t.slot_ids is not None:
+            slot_ids.extend(str(x) for x in t.slot_ids.tolist())
+        else:
+            slot_ids.extend([""] * s)
         off += s
         pitch = pitch or t.pitch
-    return Tracking(lo, ball, xy, np.array(team, dtype="<U1"), kick, origin, pitch, fps)
+    ids = np.asarray(slot_ids, dtype=object) if any(slot_ids) else None
+    return Tracking(lo, ball, xy, np.array(team, dtype="<U1"), kick, origin, pitch, fps, ids)
 
 
 class MatchInputs:
