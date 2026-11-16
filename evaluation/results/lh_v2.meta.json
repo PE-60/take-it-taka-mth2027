@@ -1,0 +1,49 @@
+{
+ "name": "lh_v2",
+ "algorithm": "lh_v2",
+ "class": "LinkHoernigV2",
+ "description": "LH V2: velocity-vector touches plus look-ahead retention on gains; whole video, tactical only",
+ "dead_ball": false,
+ "source": "tactical",
+ "params": {
+  "t_p": 1.0,
+  "t_a": 2.5,
+  "keep_horizon_s": 1.0,
+  "gain_horizon_s": 1,
+  "gain_min_near_fraction": 0.6,
+  "velocity_window_s": 1,
+  "touch_dv_m_s": 2.0,
+  "touch_window_s": 0.08,
+  "touch_refractory_s": 0.2,
+  "switch_dv_margin_m_s": 0.0,
+  "smooth_switch_penalty": 0
+ },
+ "created": "2026-11-13T15:59:41",
+ "inputs": {
+  "tactical": {
+   "from": "raw data",
+   "path": "data/tactical/BAR-ATH_tactical_atd.txt",
+   "frames": [
+    0,
+    199318
+   ]
+  }
+ },
+ "frames": 199319,
+ "covered": 199319,
+ "labelled_runs": 1,
+ "from_broadcast": 0,
+ "counts": {
+  "H": 89148,
+  "A": 98751,
+  "D": 0,
+  "X": 11420
+ },
+ "public_gt": {
+  "gt": "BAR-ATH_possession_gt_public.csv",
+  "spell_f1_mean": 0.13333333333333333,
+  "macro_f1": 0.48118688134948845,
+  "accuracy": 0.6549333333333334,
+  "n_graded": 7500
+ }
+}
