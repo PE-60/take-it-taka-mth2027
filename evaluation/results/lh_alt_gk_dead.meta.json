@@ -14,7 +14,7 @@
   "goalkeeper_csv": "/home/pete/Projects/FC_Barca_Hackathon/take-it-taka-mth2027/data_correction/goalkeeper_trackers/goalkeeper_tracks.csv",
   "raw_gk_trackers": "24,46"
  },
- "created": "2026-11-15T15:40:07",
+ "created": "2026-11-16T14:54:59",
  "inputs": {
   "tactical": {
    "from": "raw data",
