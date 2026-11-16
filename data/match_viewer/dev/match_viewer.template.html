@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Match viewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0f1012; --panel:#17191c; --panel2:#1d2024; --line:#2a2e33; --line2:#3a3f46;
+  --fg:#e8eaed; --muted:#9aa0a8; --dim:#5f656d;
+  --home:#eb4646; --away:#32aaeb; --dead:#bdbdbd; --none:#4a4e55;
+  --good:#5adc5a; --warn:#f5d73c; --bad:#f03c3c;
+  --ring:#ffe600; --kick:#ffc800; --jump:#c850ff; --churn:#ff8cc8; --lost:#f03c3c; --bolt:#e650e6; --air:#78dcff;
+  --throw:#3cc8ff; --corner:#ffc83c; --goalkick:#ff78c8; --freekick:#5adc5a; --kickoff:#ffffff;
+  --dbview:#ff9f40; --dbball:#c88cff;
+  font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; font-size:13px; line-height:1.35;
+  font-variant-numeric:tabular-nums; color:var(--fg); background:var(--bg);
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg)}
+body{--sidew:310px;display:grid;grid-template-rows:44px minmax(0,1fr) auto;grid-template-columns:minmax(0,1fr) 5px var(--sidew);grid-template-areas:"hdr hdr hdr" "stage split side" "tl split side";height:100vh;overflow:hidden}
+body.resizing{user-select:none}
+body.noside{grid-template-columns:minmax(0,1fr) 0 0} body.noside #side,body.noside #sideSplit{display:none}
+body.notl #tl{display:none}
+#hdr button.off{color:var(--dim)}
+body.embed #hdr{gap:6px;padding:0 8px;white-space:nowrap;overflow:hidden} body.embed #hdr .title,body.embed #clkHalf,body.embed #bHelp{display:none}
+body.embed #srcName{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis} body.embed #clock{gap:8px} body.embed #clock .big{font-size:14px}
+body.embed #hdr button{padding:2px 7px}
+/* inside the dual page play, speed, layers and the radius are set once in its header */
+body.embed #bPlay,body.embed #speed{display:none}
+#sideSplit{grid-area:split;cursor:col-resize;background:var(--line)} #sideSplit:hover,#sideSplit.on{background:var(--muted)}
+.mono{font-family:"JetBrains Mono",ui-monospace,Consolas,monospace}
+.lbl{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}
+button,select,input[type=range]{font:inherit;color:var(--fg)}
+button{background:var(--panel2);border:1px solid var(--line2);border-radius:5px;padding:3px 9px;cursor:pointer}
+button:hover{border-color:var(--muted)}
+select{background:var(--panel2);border:1px solid var(--line2);border-radius:5px;padding:2px 6px}
+kbd{font:500 10.5px "JetBrains Mono",monospace;background:#23272c;border:1px solid var(--line2);border-bottom-width:2px;border-radius:3px;padding:0 4px;color:var(--muted)}
+#hdr{grid-area:hdr;display:flex;align-items:center;gap:14px;padding:0 14px;border-bottom:1px solid var(--line);background:var(--panel)}
+#hdr .title{font-weight:600} #hdr .sub{color:var(--muted)} #hdr .sp{flex:1}
+#clock{display:flex;gap:16px;align-items:baseline} #clock .big{font-size:16px;font-weight:600}
+#loopInd{color:var(--air);font-size:12px}
+#stage{grid-area:stage;position:relative;display:flex;align-items:center;justify-content:center;background:#000;overflow:hidden}
+#wrap{position:relative}
+#vclip{position:absolute;inset:0;overflow:hidden}
+#vz{position:absolute;left:0;top:0;transform-origin:0 0}
+#vclip.panning,#vclip.panning #ov{cursor:grabbing}
+video{display:block}
+#ov{position:absolute;left:0;top:0}
+#mag{position:absolute;display:none;border:1px solid #fff;border-radius:50%;pointer-events:none;z-index:6;box-shadow:0 4px 18px rgba(0,0,0,.6)}
+#zoomCtl{position:absolute;right:10px;bottom:10px;z-index:5;display:flex;gap:4px;align-items:center;background:rgba(15,16,18,.78);border:1px solid var(--line);border-radius:6px;padding:3px 5px;font-size:12px}
+#zoomCtl button{padding:1px 7px} #zoomV{min-width:40px;text-align:center}
+#possCard{position:absolute;left:12px;top:12px;display:flex;flex-direction:column;gap:4px;z-index:4;pointer-events:none}
+#possGrip{pointer-events:auto;display:flex;align-items:center;gap:6px;align-self:flex-start;cursor:grab;background:rgba(15,16,18,.78);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:11px;color:var(--muted);user-select:none;opacity:.55}
+#possCard:hover #possGrip{opacity:1} #possCard.dragging #possGrip{cursor:grabbing;opacity:1}
+#possGrip button{padding:0 5px;font-size:11px;line-height:1.4}
+#possCards{display:flex;gap:10px;pointer-events:none} #possCard.vert #possCards{flex-direction:column;gap:6px}
+.card{background:rgba(15,16,18,.78);backdrop-filter:blur(6px);border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:150px}
+.card .big{font-size:40px;font-weight:600;line-height:1;margin:2px 0 4px} .card .name{font-weight:500} .card .sub{color:var(--muted);font-size:12px}
+#tip,#tip2{position:absolute;pointer-events:none;background:rgba(15,16,18,.94);border:1px solid var(--line2);border-radius:6px;padding:6px 9px;font-size:12px;display:none;z-index:9;white-space:nowrap}
+#tip2{position:fixed}
+#side{grid-area:side;border-left:1px solid var(--line);background:var(--panel);overflow-y:auto;display:flex;flex-direction:column}
+.sec{padding:10px 12px;border-bottom:1px solid var(--line)}
+.sec h3{margin:0 0 8px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500;display:flex;gap:8px;align-items:baseline}
+.row{display:flex;justify-content:space-between;gap:8px;padding:2px 0} .row .k{color:var(--muted)} .row .v{text-align:right}
+.chk{display:flex;align-items:center;gap:7px;padding:2px 0;cursor:pointer} .chk input{accent-color:var(--away)}
+.sw{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:middle}
+.ev{display:flex;gap:8px;align-items:center;padding:3px 4px;border-radius:4px;cursor:pointer} .ev:hover{background:var(--panel2)} .ev.cur{background:#2b3a4a}
+.ev .g{width:10px;height:10px;flex:none} .ev .t{flex:1} .ev .f{color:var(--muted);font-size:12px}
+.ev .st{width:14px;text-align:center;font-weight:600;color:var(--dim)} .st.done{color:var(--good)} .st.skipped{color:var(--muted)} .st.flagged{color:var(--bolt)}
+.pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;color:#000}
+textarea{width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:5px;color:var(--fg);font:inherit;padding:5px;resize:vertical;min-height:40px}
+.hint{color:var(--dim);font-size:11.5px}
+.pal{display:grid;grid-template-columns:1fr 1fr;gap:3px 6px;margin:4px 0 6px}
+.tool{display:flex;align-items:center;gap:6px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;cursor:pointer;background:var(--panel2);font-size:12px}
+.tool:hover{border-color:var(--muted)} .tool.armed{border-color:#fff;background:#2b3a4a} .tool .sw{margin:0} .tool kbd{margin-left:auto}
+#armed{font-size:12px;color:var(--warn);min-height:16px}
+.rule{background:#2a2410;border:1px solid #5a4a16;border-radius:6px;padding:6px 8px;font-size:11.5px;color:#e6d28a;margin-bottom:8px}
+.presets{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px}
+#tl{--lblw:112px;grid-area:tl;position:relative;border-top:1px solid var(--line);background:var(--panel);padding:8px 12px 10px;display:flex;flex-direction:column;gap:4px;max-height:45vh;min-height:0}
+#tl.sized{max-height:none}
+#tlSplit{position:absolute;left:0;right:0;top:-3px;height:7px;cursor:row-resize;z-index:3} #tlSplit:hover,#tlSplit.on{background:rgba(255,255,255,.18)}
+#tlctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;position:relative;flex:none} #tlctl .sp{flex:1}
+#tlbody{flex:1 1 auto;min-height:40px;overflow-y:auto;overflow-x:hidden;display:grid;grid-template-columns:var(--lblw) 6px minmax(0,1fr);align-items:start}
+#lblSplit{align-self:stretch;cursor:col-resize;border-right:1px solid var(--line);margin-right:2px} #lblSplit:hover,#lblSplit.on{border-right-color:var(--muted)}
+#rowlabels{position:relative;overflow:hidden} #rowlabels div{position:absolute;left:0;right:0;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1}
+#rowH{width:70px}
+#rowlabels div.grp{color:var(--dim);letter-spacing:.06em;text-transform:uppercase;font-size:10px} #rowlabels div.pin{color:#fff}
+#tlc{display:block;width:100%;cursor:crosshair}
+#legend{flex:none;display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);align-items:center} #legend span{display:inline-flex;align-items:center;gap:5px} #legend canvas{width:12px;height:12px}
+#rowpop,#ovpop{position:absolute;right:0;top:100%;margin-top:4px;max-height:60vh;overflow:auto;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:10px 12px;display:none;z-index:8;min-width:260px;box-shadow:0 8px 24px rgba(0,0,0,.5)} #rowpop .grp{margin:6px 0 2px}
+#help{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;z-index:20} #help .box{position:absolute;right:calc(var(--sidew) + 10px);top:60px;width:520px;max-height:85vh;overflow:auto;background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:14px 18px}
+#help .box h2{margin:0 0 10px;font-size:14px}
+</style>
+</head>
+<body>
+<header id="hdr">
+  <span class="title">Match viewer</span><span class="sub" id="srcName">-</span>
+  <span class="sp"></span>
+  <div id="clock"><span class="big mono" id="clkFrame">frame -</span><span class="mono" id="clkTime">-</span><span class="sub" id="clkHalf"></span><span id="loopInd"></span></div>
+  <span class="sp"></span>
+  <button id="bPlay" title="space">▶ play</button>
+  <select id="speed" title="[ and ]"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select>
+  <button id="bTogTl" title="show / hide the timeline">timeline</button><button id="bTogSide" title="show / hide the side panel">panel</button>
+  <button id="bHelp" title="?">? shortcuts</button>
+</header>
+
+<div id="stage"><div id="wrap">
+  <div id="vclip"><div id="vz"><video id="v" preload="auto" muted playsinline></video><canvas id="ov"></canvas></div></div>
+  <canvas id="mag"></canvas>
+  <div id="possCard"><div id="possGrip" title="drag to move · double-click to reset position"><span>⠿ cards</span><button id="bCardDir" title="stack cards vertically / horizontally">⇅</button></div><div id="possCards"></div></div>
+  <div id="zoomCtl" title="wheel on the video = zoom at cursor · drag (or middle / right drag) = pan when zoomed · - / = keys"><button id="bZoomOut">−</button><span id="zoomV" class="mono">1.0×</span><button id="bZoomIn">+</button><button id="bZoomReset" title="reset zoom">⟲</button></div>
+  <div id="tip"></div>
+</div></div>
+<div id="tip2"></div>
+<div id="sideSplit" title="drag to resize the side panel · double-click to reset"></div>
+
+<aside id="side">
+  <div class="sec" id="frameInfo"><h3>This frame</h3><div id="fi"></div></div>
+
+  <div class="sec" id="cand"><h3>Candidates <span class="hint" id="candN"></span></h3>
+    <select id="candType" style="width:100%;margin-bottom:6px">
+      <option value="gt_vs_lh">GT ≠ L&amp;H heuristic (segment starts)</option>
+      <option value="gt_vs_pred">GT ≠ prediction (segment starts)</option>
+      <option value="lh_raw_vs_post">L&amp;H raw ≠ L&amp;H filtered ball (segment starts)</option>
+      <option value="moved">filter moved the ball &gt; 2 m</option>
+      <option value="gt_vs_sub">GT ≠ submission (D + filtered L&amp;H)</option>
+      <option value="dead_vs_gt">our dead ball ≠ GT dead</option>
+      <option value="gt_change">GT transitions</option>
+      <option value="restart">restarts (dead ball ends)</option>
+      <option value="dead">dead ball, derived (interval starts)</option>
+      <option value="kick">kicks</option>
+      <option value="referee">AR flag signals</option>
+      <option value="lost">ball lost (stretch starts)</option>
+      <option value="jump">teleports (ball / player)</option>
+      <option value="churn">vanish / appear</option>
+      <option value="ambig">ambiguous ring (0 or ≥2 players within radius, GT alive)</option>
+    </select>
+    <div class="hint" style="margin-bottom:4px"><kbd>Enter</kbd> done · <kbd>Backspace</kbd> skipped · <kbd>!</kbd> flagged · each advances to the next unhandled · <label class="chk" style="display:inline-flex"><input type="checkbox" id="inclHandled"> step through handled too</label></div>
+    <div id="cands" style="max-height:200px;overflow:auto"></div>
+  </div>
+
+  <div class="sec" id="ann"><h3>Annotate</h3>
+    <div class="rule">Rule 1 of the challenge: hand labels or corrections on <b>this</b> game may not be used for the submission, training or validation. Use these to characterise failures and data errors for your write-up, or to label other games.</div>
+    <div class="lbl" style="margin:4px 0 2px">possession reading · segment (team <kbd>H</kbd> <kbd>A</kbd>, state below)</div>
+    <div class="pal" id="palState"></div>
+    <div class="lbl" style="margin:4px 0 2px">event · point at this frame</div>
+    <div class="pal" id="palEvent"></div>
+    <div class="lbl" style="margin:4px 0 2px">data error · interval: key opens, same key or Enter closes</div>
+    <div class="pal" id="palData"></div>
+    <div id="armed"></div>
+    <textarea id="note" placeholder="note for the next annotation or bookmark…" style="margin-top:6px"></textarea>
+    <div class="hint" id="noteInd"></div>
+    <div style="display:flex;gap:6px;align-items:center;margin-top:6px"><span class="lbl">show</span>
+      <select id="annFilter" style="flex:1"><option value="">all categories</option><option value="event">events</option><option value="data">data errors</option></select>
+      <span class="hint" id="annN"></span></div>
+    <div id="annList" style="max-height:200px;overflow:auto;margin-top:4px"></div>
+    <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+      <button id="bExpA">export json</button><button id="bExpAC">export csv</button><button id="bExpHR" title="frame, team, state, derived_label, annotator (not a submission file)">export human reading</button>
+      <label class="tool" style="padding:3px 9px">import json<input type="file" id="impA" accept=".json" style="display:none"></label><button id="bClr">clear mine</button>
+    </div>
+    <h3 style="margin-top:10px">Agreement: L&amp;H raw vs filtered vs GT, second annotator (layer B)</h3>
+    <div id="agree"></div>
+    <button id="bClearB" style="margin-top:4px">remove layer B</button>
+  </div>
+
+  <div class="sec" id="bm"><h3>Bookmarks</h3>
+    <div style="display:flex;gap:6px;flex-wrap:wrap"><button id="bAdd">+ bookmark (B)</button><button id="bExpB">export bookmarks</button></div>
+    <div id="bms" style="margin-top:6px;max-height:160px;overflow:auto"></div>
+  </div>
+
+  <div class="sec"><h3>Pinned</h3><div id="pinned" class="hint">click a player on the pitch to pin; shift-click two for a distance; click a slot row label to pin that slot</div></div>
+
+  <div class="sec"><h3>Layers</h3><div id="layers"></div>
+    <div class="row" style="margin-top:6px"><span class="k">possession radius</span><span class="v" id="radV">1.0 m</span></div>
+    <input type="range" id="rad" min="0.5" max="3" step="0.1" value="1" style="width:100%">
+    <div class="hint">recomputes NAIVE, L&amp;H and the candidate list live</div>
+  </div>
+</aside>
+
+<div id="tl">
+  <div id="tlSplit" title="drag to resize the timeline · double-click to reset"></div>
+  <div id="tlctl">
+    <span class="lbl">timeline</span>
+    <span class="hint">click = seek · drag = zoom · wheel = zoom at cursor · ⇧ wheel = scroll rows · click the overview to jump</span>
+    <span class="sp"></span>
+    <span class="lbl">row h</span><input type="range" id="rowH" min="6" max="28" step="1" value="11" title="row height">
+    <button id="bOverview">overview ▾</button><div id="ovpop"></div>
+    <button id="bRows">rows ▾</button><div id="rowpop"></div>
+    <span class="lbl">step events</span>
+    <select id="stepType">
+      <option value="restart">restarts</option><option value="dead">dead ball (derived)</option><option value="gt_change">GT transitions</option><option value="kick">kicks</option>
+      <option value="referee">AR flags</option>
+      <option value="lost">ball lost</option><option value="jump">teleports</option><option value="churn">vanish/appear</option><option value="cand">candidate queue</option>
+    </select>
+    <button id="bPrev">‹ prev</button><button id="bNext">next ›</button>
+  </div>
+  <div id="tlbody"><div id="rowlabels"></div><div id="lblSplit" title="drag to resize the labels column"></div><canvas id="tlc"></canvas></div>
+  <div id="legend"></div>
+</div>
+
+<div id="help"><div class="box"><h2>Shortcuts</h2><div id="helpBody"></div><div class="hint" style="margin-top:8px">Esc or click outside closes</div></div></div>
+
+<!--VIEWER_SCRIPT-->
+</body>
+</html>

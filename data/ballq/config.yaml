@@ -1,0 +1,82 @@
+# Every number the pipeline uses. The hash of this file goes into ball_quality.json.
+pitch_m: [105.3, 68.0]
+fps: 25
+
+grid:
+  cell_m: 0.25            # cell size; 0.25 m gives 421 x 273 cells
+  chunk_frames: 600      # frames per forward-backward chunk (24 s); 600 + 2 x 150 frames of float32 grid is about 400 MB
+  overlap_frames: 150     # frames of context on each side of a chunk (6 s)
+  mass_min_out: 0.002     # cells below this mass are not written to ball_grid
+
+motion:
+  speed_cap_ms: 35.0      # faster than any recorded shot
+  rolling_sigma_m: 0.6    # position noise per frame at rest, grows with speed
+  rolling_sigma_per_ms: 0.03
+  carried_radius_m: 2.0   # players this close share the carried model
+  carried_sigma_m: 0.5
+  weights: {rolling: 0.80, carried: 0.17, anywhere: 0.03}
+  weights_dead: {rolling: 0.95, carried: 0.00, anywhere: 0.05}
+
+observe:
+  # the detector likelihood is (1 - tau) flat + tau Gaussian(sigma): tau is how much we believe the point
+  base_sigma_m: 0.5       # detector noise when everything looks fine
+  base_tau: 0.95
+  air_ball_tau: 0.10      # implied speed above the cap, or an acceleration spike with nobody near
+  white_blend_tau: 0.60   # nearest player within 1 m wears the light kit
+  white_blend_radius_m: 1.0
+  homography_bad_m: 1.0   # reprojection error above this scales the width and lowers tau
+  homography_bad_tau: 0.50
+  dead_factor: 0.3        # dead ball: detector noise is the only error
+  dead_tau: 0.98
+  gate_radius_m: 2.0      # gating compares predicted mass within this radius of the point with that around the predicted mean
+  gate_ratio_min: 0.05    # the point is not believed (tau -> gate_tau) when it has less than this fraction of the mass the mean has
+  gate_tau: 0.10
+  holder_sigma_m: 0.7     # width of the player-as-holder observation
+  holder_weight_max: 0.6  # how much the player observation can pull when a holder is likely
+  restart_sigma_m: 1.5    # prior at the restart spot at the end of a set-piece tag
+  restart_weight: 0.7     # mixture weight of that prior; a trusted detector point elsewhere still wins
+
+features:
+  dead_from_gt: false     # never true for the challenge submission (rule 1): GT is evaluation only
+  kick_accel_ms2: 4.0     # Link and Hoernig: a kick is a local maximum above this
+  kick_min_gap_s: 0.3
+  near_player_m: 2.0
+
+possession:
+  tp_m: 1.0               # sphere of influence (gain)
+  ta_m: 2.5               # end test on the predicted ball
+  horizon_s: 1.0
+  mass_gain: 0.5          # posterior mass inside tp needed to gain
+  mass_hold: 0.2          # below this the holder is dropped
+  kick_window_s: 0.2      # a kick this close in time counts as the ball action that starts a possession
+  ctrl_rel_speed_ms: 2.0  # or control: ball and player move together (relative speed below this) and the ball is predicted within ta
+  end_hold_s: 1.0         # the predicted ball must stay outside ta this long before the holder is dropped
+
+colours:
+  frames_sampled: 300
+  patch_px: 10
+  shirt_height_m: 1.0
+  white_lightness_min: 170  # Lab L above this and chroma below the max reads as white
+  white_chroma_max: 25
+  override_white_team: null      # 'H' or 'A' to skip both options
+  kit_db_file: null              # default: kit_colours.yaml next to this file
+  kit_db_http: true              # try TheSportsDB when the file has no entry
+
+# The control model (ballq/control.py): ball state changes only through interaction with a player.
+control:
+  r_pz_m: 1.0             # possession zone: the ball is "at" a player inside this radius (Vidal-Codina et al., providers B and C; Link and Hoernig T_P)
+  r_dz_m: 1.0             # duel zone around the ball: an opponent inside it makes the touch contested
+  smooth_window: 7        # Savitzky-Golay window on the ball track in frames (Vidal-Codina et al.: 7 frames, order 2)
+  speed_cap_ms: 60.0      # teleport gate: a point the ball could not have reached at this speed is dropped (0 = off). Above any real ball, so it only removes detector jumps
+  merge_gap_frames: 3     # a run at one player may be interrupted this long and still be one run
+  vel_window_frames: 5    # frames averaged for the ball velocity before and after a run
+  vel_search_s: 1.0       # how far to look for a seen ball before and after a run (covers a ball hidden by the player)
+  dv_touch_ms: 3.0        # velocity change across the run that counts as a touch (12 m/s deflected by 15 degrees is 3.1 m/s)
+  ctrl_touch_s: 0.5       # or the ball stays with the player this long (a pass at 12 m/s crosses the zone in under 0.2 s)
+  duel_factor: 0.7        # confidence of a contested touch is multiplied by this
+  p_touch_min: 0.5        # a run below this confidence is the ball passing by and is dropped
+  taker_window_s: 1.0     # a run that starts this soon after a dead ball is the restart taker, who does not count
+  interp_max_s: 3.0       # an unseen free ball is interpolated between sightings up to this long
+  flight_dev_m: 1.5       # between two touches, a seen track bowing this far off the straight line is a ball in the air
+  flight_min_m: 8.0       # only for balls that travel at least this far
+  flight_sd_m: 1.5        # spread given to a position taken from the flight line
