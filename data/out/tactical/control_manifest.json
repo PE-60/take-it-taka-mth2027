@@ -1,0 +1,133 @@
+{
+ "model": "control",
+ "ballq_version": "0.1.0",
+ "config_hash": "8fb3ac230931",
+ "config": {
+  "r_pz_m": 1.0,
+  "r_dz_m": 1.0,
+  "smooth_window": 7,
+  "speed_cap_ms": 60.0,
+  "merge_gap_frames": 3,
+  "vel_window_frames": 5,
+  "vel_search_s": 1.0,
+  "dv_touch_ms": 3.0,
+  "ctrl_touch_s": 0.5,
+  "duel_factor": 0.7,
+  "p_touch_min": 0.5,
+  "taker_window_s": 1.0,
+  "interp_max_s": 3.0,
+  "flight_dev_m": 1.5,
+  "flight_min_m": 8.0,
+  "flight_max_s": 0,
+  "flight_sd_m": 1.5
+ },
+ "inputs": {
+  "atd_txt": {
+   "file": "BAR-ATH_tactical_atd.txt",
+   "bytes": 195714285
+  },
+  "atd_xml": {
+   "file": "BAR-ATH_tactical_atd.xml",
+   "bytes": 59057
+  },
+  "homography": {
+   "file": "BAR-ATH_tactical_homography.csv",
+   "bytes": 23187043
+  },
+  "dead_ball": {
+   "file": "dead_ball.json",
+   "intervals": 103
+  }
+ },
+ "frames": [
+  0,
+  199318
+ ],
+ "rows": {
+  "touches": 1414,
+  "possession_frames": 199319,
+  "ball_track": 199319
+ },
+ "schema": {
+  "touches": [
+   "frame_start",
+   "frame_end",
+   "slot",
+   "team",
+   "duration_s",
+   "dv_ms",
+   "duel",
+   "p",
+   "kind"
+  ],
+  "possession_frames": [
+   "frame",
+   "state",
+   "holder_slot",
+   "team",
+   "p_team",
+   "p_home",
+   "p_away",
+   "p_dead",
+   "event",
+   "restart_zone",
+   "label"
+  ],
+  "ball_track": [
+   "frame",
+   "x",
+   "y",
+   "sd_m",
+   "source",
+   "raw_x",
+   "raw_y"
+  ]
+ },
+ "summary": {
+  "labels": {
+   "D": 68131,
+   "H": 63710,
+   "A": 53286,
+   "X": 14192
+  },
+  "states": {
+   "free": 103814,
+   "dead": 68131,
+   "held": 27374
+  },
+  "touch_kinds": {
+   "keep": 775,
+   "gain": 427,
+   "passed_by": 154,
+   "taker": 58
+  },
+  "ball_source_share": {
+   "seen": 0.3888,
+   "unknown": 0.3842,
+   "flight": 0.2097,
+   "held": 0.0167,
+   "interp": 0.0007
+  },
+  "flight_segments": {
+   "count": 269,
+   "median_s": 4.32,
+   "p90_s": 11.808000000000003,
+   "max_s": 37.92,
+   "share_of_flight_frames_in_segments_over_5s": 0.711892797319933
+  },
+  "gains": 427,
+  "restarts": 103,
+  "restart_zones": {
+   "other": 48,
+   "unseen": 36,
+   "touchline": 11,
+   "goal_area": 6,
+   "corner": 2
+  }
+ },
+ "files": [
+  "touches.csv",
+  "possession_frames.csv",
+  "ball_track.csv"
+ ]
+}

@@ -79,4 +79,5 @@ control:
   interp_max_s: 3.0       # an unseen free ball is interpolated between sightings up to this long
   flight_dev_m: 1.5       # between two touches, a seen track bowing this far off the straight line is a ball in the air
   flight_min_m: 8.0       # only for balls that travel at least this far
+  flight_max_s: 0         # 0 = no limit. Set to about 5 to skip gaps longer than a ball can stay in the air; decide from flight_segments in control_manifest.json
   flight_sd_m: 1.5        # spread given to a position taken from the flight line

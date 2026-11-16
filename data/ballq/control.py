@@ -198,7 +198,9 @@ def flight_chords(ball_m, seen, touches, dead, fps, ccfg):
     n = len(ball_m); mask = np.zeros(n, bool); pos = np.full((n, 2), np.nan)
     for a, b in zip(touches[:-1], touches[1:]):
         f0, f1 = a["f1"], b["f0"]
-        if f1 - f0 < 3 or dead[f0:f1 + 1].any() or not (seen[f0] and seen[f1]):
+        # flight_max_s (off by default) would skip gaps longer than a ball can stay in the air
+        too_long = ccfg.get("flight_max_s", 0) and f1 - f0 > ccfg["flight_max_s"] * fps
+        if f1 - f0 < 3 or too_long or dead[f0:f1 + 1].any() or not (seen[f0] and seen[f1]):
             continue
         p0, p1 = ball_m[f0], ball_m[f1]; chord = p1 - p0; L = float(np.hypot(*chord))
         if L < ccfg["flight_min_m"]:
@@ -293,6 +295,16 @@ def validate_outputs(touches, poss, track):
         raise ValueError("ball_track: a located frame has no position or spread")
 
 
+def flight_summary(track, fps=25):
+    """how long the stretches replaced by a flight line are: the evidence for or against the rule"""
+    segs = _segments((track.source == "flight").to_numpy())
+    if not segs:
+        return {"count": 0}
+    d = np.array([(b - a) / fps for a, b in segs])
+    return {"count": len(d), "median_s": float(np.median(d)), "p90_s": float(np.percentile(d, 90)), "max_s": float(d.max()),
+            "share_of_flight_frames_in_segments_over_5s": float(d[d > 5].sum() / d.sum())}
+
+
 def manifest(touches, poss, track, ccfg, inputs, config_hash, version):
     """what was made, from what, with which settings: enough to trust or reproduce the tables"""
     src = track.source.value_counts(normalize=True).round(4).to_dict()
@@ -300,5 +312,5 @@ def manifest(touches, poss, track, ccfg, inputs, config_hash, version):
             "frames": [int(poss.frame.iloc[0]), int(poss.frame.iloc[-1])], "rows": {"touches": len(touches), "possession_frames": len(poss), "ball_track": len(track)},
             "schema": {"touches": TOUCH_COLUMNS, "possession_frames": POSSESSION_COLUMNS, "ball_track": TRACK_COLUMNS},
             "summary": {"labels": poss.label.value_counts().to_dict(), "states": poss.state.value_counts().to_dict(), "touch_kinds": touches.kind.value_counts().to_dict(),
-                        "ball_source_share": src, "gains": int((poss.event == "gain").sum()), "restarts": int((poss.event == "restart").sum()),
+                        "ball_source_share": src, "flight_segments": flight_summary(track), "gains": int((poss.event == "gain").sum()), "restarts": int((poss.event == "restart").sum()),
                         "restart_zones": poss.loc[poss.event == "restart", "restart_zone"].value_counts().to_dict()}}

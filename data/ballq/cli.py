@@ -361,7 +361,10 @@ def cmd_submit(args):
     man["files"] = [os.path.basename(p) for p in written_tables]
     write_quality(os.path.join(cdir, "control_manifest.json"), man)
     kinds = touches.kind.value_counts().to_dict()
-    print(f"control    : {n} frames in {time.time() - t0:.0f} s; zone runs {len(touches)}: {kinds}; ball seen {100 * (track.source == 'seen').mean():.0f} %, held {100 * (track.source == 'held').mean():.0f} %, interpolated {100 * (track.source == 'interp').mean():.0f} %, unknown {100 * (track.source == 'unknown').mean():.0f} % -> {cdir}")
+    print(f"control    : {n} frames in {time.time() - t0:.0f} s; zone runs {len(touches)}: {kinds}; ball seen {100 * (track.source == 'seen').mean():.0f} %, flight line {100 * (track.source == 'flight').mean():.0f} %, held {100 * (track.source == 'held').mean():.0f} %, interpolated {100 * (track.source == 'interp').mean():.0f} %, unknown {100 * (track.source == 'unknown').mean():.0f} % ({100 * ((track.source == 'unknown') & dead).mean():.0f} % of it during dead ball) -> {cdir}")
+    fs = man["summary"]["flight_segments"]
+    if fs["count"]:
+        print(f"flight line: {fs['count']} stretches, median {fs['median_s']:.1f} s, 90 % under {fs['p90_s']:.1f} s, longest {fs['max_s']:.1f} s; {100 * fs['share_of_flight_frames_in_segments_over_5s']:.0f} % of those frames sit in stretches over 5 s")
     control_frames = pd.DataFrame({"frame": poss.frame, "control": poss.team.replace("", "X")})
     if args.quick:
         # the base Link and Hoernig on the raw ball over the whole match: tracking only, no filter, no video
@@ -418,7 +421,13 @@ def cmd_submit(args):
             # the official scorer over a folder holding just our files; its scoreboard and reports land in out/evaluation
             import shutil
             res_dir = os.path.join(args.out, "submissions"); ev_out = os.path.join(args.out, "evaluation")
-            shutil.rmtree(res_dir, ignore_errors=True); os.makedirs(res_dir); os.makedirs(ev_out, exist_ok=True)
+            # a synced folder (OneDrive) can refuse to delete a directory, so empty it file by file instead
+            os.makedirs(res_dir, exist_ok=True); os.makedirs(ev_out, exist_ok=True)
+            for old_file in glob.glob(os.path.join(res_dir, "*.csv")):
+                try:
+                    os.remove(old_file)
+                except OSError:
+                    print(f"  ! could not remove {old_file}; it will be scored too")
             for p in passed:
                 shutil.copy(p, res_dir)
             for p in args.also or []:                                      # other people's submissions, scored on the same board
@@ -429,6 +438,46 @@ def cmd_submit(args):
             print(f"\nscoreboard and reports in {ev_out}")
     else:
         print("validate_submission.py not found under the data root; run it from the challenge repository on the files above")
+
+
+def cmd_diagnose(args):
+    """take the scores apart: which true possessions break and why, and where each change lands"""
+    import importlib.util
+    from . import diagnose as dg
+    from .contract import read_table
+    pm_path = find(args.data, "possession_metrics.py", required=False)
+    gt_path = find(args.data, "*possession_gt_public.csv", required=False)
+    if not pm_path or not gt_path:
+        sys.exit("need the challenge repository under the data root (evaluation/possession_metrics.py and the public ground truth)")
+    spec = importlib.util.spec_from_file_location("possession_metrics", pm_path); pm = importlib.util.module_from_spec(spec); spec.loader.exec_module(pm)
+    gt = dg.load_codes(gt_path)
+    files = args.files or [p for p in (os.path.join(args.out, "submission_control.csv"), os.path.join(args.out, "submission_lh_raw.csv")) if os.path.exists(p)]
+    if not files:
+        sys.exit("no submission files: run  python -m ballq submit --quick  first, or pass --files")
+    try:
+        touches = read_table(os.path.join(args.out, "tactical", "touches")); track = read_table(os.path.join(args.out, "tactical", "ball_track"))
+    except FileNotFoundError:
+        touches = track = None
+    ddir = os.path.join(args.out, "evaluation", "diagnose"); os.makedirs(ddir, exist_ok=True)
+    results = {}
+    for p in files:
+        name = os.path.splitext(os.path.basename(p))[0].replace("submission_", "")
+        pred = dg.load_codes(p)
+        if len(pred) != len(gt):
+            print(f"  ! {p}: {len(pred)} rows, ground truth has {len(gt)}; skipped"); continue
+        is_control = name == "control"
+        res = dg.analyse(pm, gt, pred, touches if is_control else None, track if is_control else None)
+        results[name] = res
+        for key in ("spells", "transitions", "intrusions", "gains"):
+            if len(res[key]):
+                res[key].to_csv(os.path.join(ddir, f"{name}_{key}.csv"), index=False)
+        print("\n".join(dg.summary_lines(name, res)) + "\n")
+    if not results:
+        sys.exit("nothing to diagnose: the submission files must cover every frame of the ground truth")
+    page = os.path.join(ddir, "diagnose.html")
+    with open(page, "w", encoding="utf-8") as fh:
+        fh.write(dg.report_html(gt, results, touches, track))
+    print(f"page   : {page}\ntables : {ddir}")
 
 
 def main(argv=None):
@@ -453,6 +502,10 @@ def main(argv=None):
     s.add_argument("--min-spell-s", type=float, default=1.0, help="absorb team runs shorter than this when the same team is on both sides (0 = off)")
     for flag in ("--data", "--out", "--config"):
         s.add_argument(flag, **common[flag])
+    dgp = sub.add_parser("diagnose", help="why the score is what it is: fragmentation and timing against the public ground truth")
+    dgp.add_argument("--files", nargs="*", help="submission csv files (default: out/submission_control.csv and out/submission_lh_raw.csv)")
+    for flag in ("--data", "--out"):
+        dgp.add_argument(flag, **common[flag])
     t = sub.add_parser("test", help="run the unit tests (installs pytest if needed)")
     args = ap.parse_args(argv)
     if args.cmd == "test":
@@ -463,6 +516,8 @@ def main(argv=None):
         args.data = find_data_root()
     if args.cmd == "submit":
         return cmd_submit(args)
+    if args.cmd == "diagnose":
+        return cmd_diagnose(args)
     for src in (["tactical", "broadcast"] if args.source == "all" else [args.source]):
         args.source = src
         {"run": cmd_run, "validate": cmd_validate, "inspect": cmd_inspect}[args.cmd](args)

@@ -1,0 +1,84 @@
+{
+ "ballq_version": "0.1.0",
+ "config_hash": "dee7040d135b",
+ "git_commit": null,
+ "source": "tactical",
+ "grid": {
+  "cell_m": 0.25,
+  "nrows": 272,
+  "ncols": 422,
+  "pitch_m": [
+   105.3,
+   68.0
+  ]
+ },
+ "frames": [
+  11185,
+  18684
+ ],
+ "n_frames": 7500,
+ "frames_observed": 6615,
+ "frac_lost": 0.118,
+ "frac_air_flag": 0.25906666666666667,
+ "frac_white_flag": 0.0,
+ "white_team": null,
+ "colours": {
+  "override": null,
+  "video": {
+   "team_lab": {
+    "H": [
+     124.5,
+     116.5,
+     148.5
+    ],
+    "A": [
+     141.0,
+     118.75,
+     142.0
+    ]
+   },
+   "white_team": null,
+   "mislabel": [
+    "15",
+    "29",
+    "3"
+   ],
+   "third": []
+  },
+  "database": {
+   "kits": {
+    "H": {
+     "home": "#a50044",
+     "away": "#f5f5f5",
+     "third": "#1d1d1b"
+    },
+    "A": {
+     "home": "#ee2523",
+     "away": "#f2f2f2",
+     "third": "#2b2b2b"
+    }
+   },
+   "kit_used": {
+    "H": "home",
+    "A": "home"
+   }
+  },
+  "white_team": null,
+  "decided_by": "none",
+  "notes": [
+   "H: measured colour is 80 Lab units from the closest listed kit (home); the kit list may be stale",
+   "A: measured colour is 91 Lab units from the closest listed kit (home); the kit list may be stale"
+  ]
+ },
+ "mean_entropy_bits": 7.271667911991462,
+ "median_sd_m": 0.506363476843425,
+ "gt_agreement_lh_raw": 0.8580666556126679,
+ "gt_agreement_lh_posterior": 0.7934007627259161,
+ "frac_filtered_speed_over_cap": 0.02653687158287772,
+ "run_seconds": 152.3,
+ "outputs": [
+  "C:\\Users\\kkunev\\OneDrive - Universit\u00e4t Z\u00fcrich UZH\\Documents\\FC Barcelona\\out\\tactical\\ball_frames.parquet",
+  "C:\\Users\\kkunev\\OneDrive - Universit\u00e4t Z\u00fcrich UZH\\Documents\\FC Barcelona\\out\\tactical\\ball_players.parquet",
+  "C:\\Users\\kkunev\\OneDrive - Universit\u00e4t Z\u00fcrich UZH\\Documents\\FC Barcelona\\out\\tactical\\ball_grid.parquet"
+ ]
+}
