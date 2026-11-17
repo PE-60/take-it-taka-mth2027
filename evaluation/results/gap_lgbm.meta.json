@@ -1,0 +1,430 @@
+{
+ "name": "gap_lgbm",
+ "algorithm": "gap_lgbm",
+ "class": "GapLGBM",
+ "description": "lh_alt_gk_dead on visible ball; LightGBM (team shape, pressure, anchors) + HMM inside ball-missing gaps the teacher enters with a team; corrected keepers; dead-ball intervals D; tactical",
+ "dead_ball": true,
+ "source": "tactical",
+ "params": {
+  "t_p": 1.0,
+  "t_a": 2.5,
+  "horizon_s": 1.0,
+  "kick_win": 3,
+  "min_hold_s": 0.5,
+  "corrected_gk": true,
+  "goalkeeper_csv": "C:\\Users\\bakal\\Documents\\GitHub\\take-it-taka-mth2027\\data_correction\\goalkeeper_trackers\\goalkeeper_tracks.csv",
+  "raw_gk_trackers": "24,46",
+  "num_leaves": 15,
+  "min_data_in_leaf": 300,
+  "feature_fraction": 0.8,
+  "bagging_fraction": 0.8,
+  "learning_rate": 0.05,
+  "n_folds": 5,
+  "block_s": 180.0,
+  "stride": 4,
+  "coverage": 1.0,
+  "context_s": 1.0,
+  "kick_bias": 0.5,
+  "max_gap_s": 30.0,
+  "p_switch": 0.0,
+  "tau": 0.0,
+  "seed": 0,
+  "cache": true
+ },
+ "report": {
+  "target_gaps": {
+   "n": 80,
+   "frames": 10845,
+   "median_s": 5.28,
+   "before_unknown": 0.0,
+   "after_unknown": 0.3875,
+   "frames_changed_vs_teacher": 0.18238819732595665
+  },
+  "skipped_gaps": {
+   "n": 34,
+   "frames": 3397
+  },
+  "pretend_gaps": {
+   "n": 480,
+   "frames": 54723
+  },
+  "teacher_switch_rate": 0.002737524515144912,
+  "cv_folds": [
+   {
+    "frames": 7083,
+    "gaps": 59,
+    "logloss": 0.2762480610633528,
+    "auc": 0.9530769083387048,
+    "acc_model": 0.9133135676973034,
+    "acc_before": 0.9076662431173231,
+    "acc_after": 0.8250741211351122,
+    "acc_midpoint": 0.9133135676973034,
+    "frames_differ": 1415,
+    "acc_model_differ": 0.7780918727915195,
+    "acc_midpoint_differ": 0.734982332155477,
+    "fold": 0,
+    "best_iteration": 187,
+    "train_rows": 18796,
+    "acc_hmm": 0.9247493999717634
+   },
+   {
+    "frames": 8818,
+    "gaps": 89,
+    "logloss": 0.2919713392260934,
+    "auc": 0.9041761823813743,
+    "acc_model": 0.889657518711726,
+    "acc_before": 0.872873667498299,
+    "acc_after": 0.8268314810614652,
+    "acc_midpoint": 0.9034928555227942,
+    "frames_differ": 1582,
+    "acc_model_differ": 0.7458912768647282,
+    "acc_midpoint_differ": 0.7989886219974716,
+    "fold": 1,
+    "best_iteration": 72,
+    "train_rows": 19044,
+    "acc_hmm": 0.8965751871172601
+   },
+   {
+    "frames": 11047,
+    "gaps": 103,
+    "logloss": 0.34916978968625073,
+    "auc": 0.9303172746734947,
+    "acc_model": 0.8441205757219155,
+    "acc_before": 0.7109622521951661,
+    "acc_after": 0.7900787544129628,
+    "acc_midpoint": 0.7878156965692044,
+    "frames_differ": 1944,
+    "acc_model_differ": 0.7716049382716049,
+    "acc_midpoint_differ": 0.7119341563786008,
+    "fold": 2,
+    "best_iteration": 60,
+    "train_rows": 18484,
+    "acc_hmm": 0.8484656467819317
+   },
+   {
+    "frames": 14456,
+    "gaps": 122,
+    "logloss": 0.24449223360583403,
+    "auc": 0.9626578574958837,
+    "acc_model": 0.9035694521306032,
+    "acc_before": 0.8240868843386829,
+    "acc_after": 0.8153707802988378,
+    "acc_midpoint": 0.8696734919756502,
+    "frames_differ": 3024,
+    "acc_model_differ": 0.7513227513227513,
+    "acc_midpoint_differ": 0.7387566137566137,
+    "fold": 3,
+    "best_iteration": 302,
+    "train_rows": 14998,
+    "acc_hmm": 0.9035002767017155
+   },
+   {
+    "frames": 13319,
+    "gaps": 107,
+    "logloss": 0.31823126922456924,
+    "auc": 0.9333287928225285,
+    "acc_model": 0.8688339965462872,
+    "acc_before": 0.8227344395224867,
+    "acc_after": 0.7446504992867332,
+    "acc_midpoint": 0.8144755612283204,
+    "frames_differ": 2900,
+    "acc_model_differ": 0.7903448275862069,
+    "acc_midpoint_differ": 0.6413793103448275,
+    "fold": 4,
+    "best_iteration": 58,
+    "train_rows": 16648,
+    "acc_hmm": 0.869209400105113
+   }
+  ],
+  "cv_all": {
+   "frames": 54723,
+   "gaps": 480,
+   "logloss": 0.2953319254477899,
+   "auc": 0.9406200702773818,
+   "acc_model": 0.8821336549531276,
+   "acc_before": 0.8196005335964768,
+   "acc_after": 0.7961551815507191,
+   "acc_midpoint": 0.8508122727189664,
+   "frames_differ": 10865,
+   "acc_model_differ": 0.7680625862862402,
+   "acc_midpoint_differ": 0.7162448228255868,
+   "acc_hmm": 0.8856787822305063,
+   "switches_per_gap_hmm": 0.13541666666666666,
+   "switches_per_gap_teacher": 0.3104166666666667,
+   "switches_per_gap_argmax": 0.4875
+  },
+  "hmm_grid": [
+   {
+    "p_switch": 0.001,
+    "tau": 0.2,
+    "accuracy": 0.881512343986989
+   },
+   {
+    "p_switch": 0.001,
+    "tau": 0.35,
+    "accuracy": 0.8824625842881421
+   },
+   {
+    "p_switch": 0.001,
+    "tau": 0.5,
+    "accuracy": 0.8830473475503902
+   },
+   {
+    "p_switch": 0.001,
+    "tau": 0.75,
+    "accuracy": 0.8838148493320908
+   },
+   {
+    "p_switch": 0.001,
+    "tau": 1.0,
+    "accuracy": 0.883833123184036
+   },
+   {
+    "p_switch": 0.00274,
+    "tau": 0.2,
+    "accuracy": 0.8808727591689052
+   },
+   {
+    "p_switch": 0.00274,
+    "tau": 0.35,
+    "accuracy": 0.8824625842881421
+   },
+   {
+    "p_switch": 0.00274,
+    "tau": 0.5,
+    "accuracy": 0.8820788333972918
+   },
+   {
+    "p_switch": 0.00274,
+    "tau": 0.75,
+    "accuracy": 0.8856787822305063
+   },
+   {
+    "p_switch": 0.00274,
+    "tau": 1.0,
+    "accuracy": 0.8842351479268314
+   },
+   {
+    "p_switch": 0.003,
+    "tau": 0.2,
+    "accuracy": 0.8808727591689052
+   },
+   {
+    "p_switch": 0.003,
+    "tau": 0.35,
+    "accuracy": 0.8824625842881421
+   },
+   {
+    "p_switch": 0.003,
+    "tau": 0.5,
+    "accuracy": 0.8820788333972918
+   },
+   {
+    "p_switch": 0.003,
+    "tau": 0.75,
+    "accuracy": 0.8846554465215722
+   },
+   {
+    "p_switch": 0.003,
+    "tau": 1.0,
+    "accuracy": 0.8842351479268314
+   },
+   {
+    "p_switch": 0.01,
+    "tau": 0.2,
+    "accuracy": 0.8830838952542807
+   },
+   {
+    "p_switch": 0.01,
+    "tau": 0.35,
+    "accuracy": 0.8820788333972918
+   },
+   {
+    "p_switch": 0.01,
+    "tau": 0.5,
+    "accuracy": 0.8838148493320908
+   },
+   {
+    "p_switch": 0.01,
+    "tau": 0.75,
+    "accuracy": 0.8845092557060102
+   },
+   {
+    "p_switch": 0.01,
+    "tau": 1.0,
+    "accuracy": 0.8837417539243098
+   },
+   {
+    "p_switch": 0.03,
+    "tau": 0.2,
+    "accuracy": 0.8824625842881421
+   },
+   {
+    "p_switch": 0.03,
+    "tau": 0.35,
+    "accuracy": 0.8828280613270472
+   },
+   {
+    "p_switch": 0.03,
+    "tau": 0.5,
+    "accuracy": 0.8846554465215722
+   },
+   {
+    "p_switch": 0.03,
+    "tau": 0.75,
+    "accuracy": 0.8837417539243098
+   },
+   {
+    "p_switch": 0.03,
+    "tau": 1.0,
+    "accuracy": 0.8828828828828829
+   },
+   {
+    "p_switch": 0.1,
+    "tau": 0.2,
+    "accuracy": 0.8824991319920326
+   },
+   {
+    "p_switch": 0.1,
+    "tau": 0.35,
+    "accuracy": 0.8845092557060102
+   },
+   {
+    "p_switch": 0.1,
+    "tau": 0.5,
+    "accuracy": 0.8837417539243098
+   },
+   {
+    "p_switch": 0.1,
+    "tau": 0.75,
+    "accuracy": 0.8828828828828829
+   },
+   {
+    "p_switch": 0.1,
+    "tau": 1.0,
+    "accuracy": 0.8828828828828829
+   }
+  ],
+  "hmm_used": {
+   "p_switch": 0.00274,
+   "tau": 0.75
+  },
+  "final_rounds": 72,
+  "top_features_gain": [
+   [
+    "diff_width",
+    73018.1
+   ],
+   [
+    "before",
+    44914.1
+   ],
+   [
+    "diff_hull",
+    18212.2
+   ],
+   [
+    "after",
+    10274.4
+   ],
+   [
+    "t_since_s",
+    8834.5
+   ],
+   [
+    "t_till_s",
+    8151.6
+   ],
+   [
+    "diff_length",
+    4297.2
+   ],
+   [
+    "diff_mean_speed",
+    3855.5
+   ],
+   [
+    "gap_frac",
+    3635.2
+   ],
+   [
+    "anchors_agree",
+    3516.6
+   ],
+   [
+    "O_vel_x",
+    2762.1
+   ],
+   [
+    "T_cen_y",
+    2641.6
+   ],
+   [
+    "T_vel_x",
+    2348.0
+   ],
+   [
+    "O_cen_y",
+    2256.2
+   ],
+   [
+    "ball_shift_x",
+    1903.3
+   ],
+   [
+    "O_nn_opp_mean",
+    1890.6
+   ],
+   [
+    "T_width",
+    1816.0
+   ],
+   [
+    "ball_before_touchline_m",
+    1560.3
+   ],
+   [
+    "diff_vel_x",
+    1487.1
+   ],
+   [
+    "T_nn_opp_mean",
+    1445.6
+   ]
+  ],
+  "seconds": 13.9
+ },
+ "created": "2026-11-17T21:12:42",
+ "inputs": {
+  "tactical": {
+   "from": "export",
+   "path": "match_viewer\\export\\tactical_full",
+   "frames": [
+    0,
+    199318
+   ]
+  },
+  "dead_ball": {
+   "path": "dead_ball_investigation\\dead_ball.json",
+   "frames": 106888,
+   "created": null
+  }
+ },
+ "frames": 199319,
+ "covered": 199319,
+ "labelled_runs": 111,
+ "from_broadcast": 0,
+ "counts": {
+  "H": 48939,
+  "A": 35481,
+  "D": 106888,
+  "X": 8011
+ },
+ "public_gt": {
+  "gt": "BAR-ATH_possession_gt_public.csv",
+  "spell_f1_mean": 0.5111111111111112,
+  "macro_f1": 0.8546341729698849,
+  "accuracy": 0.8477333333333333,
+  "n_graded": 7500
+ }
+}

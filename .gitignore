@@ -62,6 +62,7 @@ __pycache__/
 venv/
 env/
 .DS_Store
+.claude/settings.local.json
 
 
 # exported data from the local instance of match viewer (just local data from loading the match)
@@ -73,3 +74,5 @@ dead_ball_investigation/dead_ball.json
 # corrected data about goalkeepers
 data_correction/goalkeeper_trackers/goalkeeper_tracks.csv
 
+# gap_lgbm: cached teacher labels and features (derived from the match data)
+possesion_algorithms/gap_lgbm/cache/

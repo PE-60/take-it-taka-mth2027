@@ -11,34 +11,34 @@
   "horizon_s": 1.0,
   "kick_win": 3,
   "min_hold_s": 0.5,
-  "goalkeeper_csv": "/home/pete/Projects/FC_Barca_Hackathon/take-it-taka-mth2027/data_correction/goalkeeper_trackers/goalkeeper_tracks.csv",
+  "goalkeeper_csv": "C:\\Users\\bakal\\Documents\\GitHub\\take-it-taka-mth2027\\data_correction\\goalkeeper_trackers\\goalkeeper_tracks.csv",
   "raw_gk_trackers": "24,46"
  },
- "created": "2026-11-16T14:54:59",
+ "created": "2026-11-17T16:34:24",
  "inputs": {
   "tactical": {
-   "from": "raw data",
-   "path": "data/tactical/BAR-ATH_tactical_atd.txt",
+   "from": "export",
+   "path": "match_viewer\\export\\tactical_full",
    "frames": [
     0,
     199318
    ]
   },
   "dead_ball": {
-   "path": "dead_ball_investigation/dead_ball.json",
-   "frames": 106889,
+   "path": "dead_ball_investigation\\dead_ball.json",
+   "frames": 106888,
    "created": null
   }
  },
  "frames": 199319,
  "covered": 199319,
- "labelled_runs": 110,
+ "labelled_runs": 111,
  "from_broadcast": 0,
  "counts": {
   "H": 48835,
   "A": 35585,
-  "D": 106889,
-  "X": 8010
+  "D": 106888,
+  "X": 8011
  },
  "public_gt": {
   "gt": "BAR-ATH_possession_gt_public.csv",

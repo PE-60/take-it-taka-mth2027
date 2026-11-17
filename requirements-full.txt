@@ -59,6 +59,7 @@ jupyterlab_widgets
 kiwisolver
 kloppy
 lark
+lightgbm
 lxml
 MarkupSafe
 matplotlib

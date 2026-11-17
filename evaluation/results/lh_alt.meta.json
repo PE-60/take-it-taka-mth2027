@@ -12,11 +12,11 @@
   "kick_win": 3,
   "min_hold_s": 0.5
  },
- "created": "2026-11-15T14:52:44",
+ "created": "2026-11-17T15:29:36",
  "inputs": {
   "tactical": {
-   "from": "raw data",
-   "path": "data/tactical/BAR-ATH_tactical_atd.txt",
+   "from": "export",
+   "path": "match_viewer\\export\\tactical_full",
    "frames": [
     0,
     199318
