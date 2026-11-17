@@ -46,7 +46,9 @@ def label_match(algo: PossessionAlgorithm, inputs: MatchInputs) -> tuple[np.ndar
     n = inputs.n_frames
     labels = np.full(n, "X", dtype="<U1")
     track = inputs.tracking(algo.source)
-    runs = inputs.runs(track, algo.dead_ball)
+    # Segment at dead-ball gaps unless the algo asks for one continuous label pass + D overlay.
+    split_dead = bool(algo.dead_ball) and not bool(getattr(algo, "dead_ball_continuous", False))
+    runs = inputs.runs(track, split_dead)
     live = np.zeros(track.n, bool)
     for a, b in runs:
         live[a:b] = True
@@ -119,4 +121,17 @@ def run(algo: PossessionAlgorithm, inputs: MatchInputs, out_dir: str = RESULTS_D
         meta["public_gt"] = score(csv_path)
     with open(os.path.join(out_dir, f"{name}.meta.json"), "w") as fh:
         json.dump(meta, fh, indent=1)
+    # Optional per-switch decision log (lh_balldet / lh_balldet_gk_dead).
+    take = getattr(algo, "take_decisions", None)
+    if callable(take):
+        decisions = take()
+        if decisions and decisions.get("switches") is not None:
+            dec_path = os.path.join(out_dir, f"{name}.decisions.json")
+            with open(dec_path, "w", encoding="utf-8") as fh:
+                json.dump(decisions, fh, indent=2)
+                fh.write("\n")
+            meta["decisions"] = os.path.basename(dec_path)
+            meta["n_switches"] = int(decisions.get("n_switches") or 0)
+            with open(os.path.join(out_dir, f"{name}.meta.json"), "w") as fh:
+                json.dump(meta, fh, indent=1)
     return meta

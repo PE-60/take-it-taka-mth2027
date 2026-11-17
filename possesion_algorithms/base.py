@@ -3,7 +3,9 @@
     class MyAlgorithm(PossessionAlgorithm):
         name = "mine"                       # -> evaluation/results/mine.csv
         description = "one line for the viewer's algorithm picker"
-        dead_ball = True                    # label only the alive intervals of dead_ball.json, D on the rest
+        dead_ball = True                    # after labelling, write D on dead_ball.json frames
+        dead_ball_continuous = False        # True: one label() over the whole track, then D overlay
+                                            # False (default with dead_ball): label each alive gap alone
         source = TACTICAL_THEN_BROADCAST    # TACTICAL, BROADCAST or TACTICAL_THEN_BROADCAST
         params = {"radius_m": 1.0}          # defaults; run.py --param radius_m=1.5 overrides them
 
@@ -11,8 +13,9 @@
             ...
 
 `label` sees one stretch of frames at a time and starts from scratch on each: the whole covered
-video, or with dead_ball = True each alive interval on its own. Frames the source has no data for
-are never passed in and come out X.
+video; with ``dead_ball`` and not ``dead_ball_continuous``, each alive interval on its own; with
+``dead_ball_continuous``, one pass over the covered video then D painted on dead frames. Frames
+the source has no data for are never passed in and come out X.
 
 Algorithms that learn something from the whole match (the unsupervised ones) override `prepare`,
 which the runner calls once with the complete tracking and a mask of the rows `label` will see,
@@ -85,6 +88,8 @@ class PossessionAlgorithm:
     name: str | None = None
     description: str = ""
     dead_ball: bool = False
+    # When dead_ball and True: do not split label() at alive gaps; runner still overlays D after.
+    dead_ball_continuous: bool = False
     source: str = TACTICAL
     params: dict = {}
 
@@ -94,6 +99,8 @@ class PossessionAlgorithm:
             raise ValueError(f"{self.name}: unknown parameter(s) {unknown}; it has {sorted(type(self).params)}")
         if self.source not in SOURCES:
             raise ValueError(f"{self.name}: source must be one of {SOURCES}, got {self.source!r}")
+        if self.dead_ball_continuous and not self.dead_ball:
+            raise ValueError(f"{self.name}: dead_ball_continuous requires dead_ball=True")
         self.params = {**type(self).params, **params}
 
     def prepare(self, track: Tracking, live: np.ndarray | None = None) -> None:
@@ -107,4 +114,6 @@ class PossessionAlgorithm:
 
     def settings(self) -> dict:
         return {"algorithm": self.name, "class": type(self).__name__, "description": self.description,
-                "dead_ball": bool(self.dead_ball), "source": self.source, "params": dict(self.params)}
+                "dead_ball": bool(self.dead_ball),
+                "dead_ball_continuous": bool(self.dead_ball_continuous),
+                "source": self.source, "params": dict(self.params)}

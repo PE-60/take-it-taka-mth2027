@@ -73,3 +73,6 @@ dead_ball_investigation/dead_ball.json
 # corrected data about goalkeepers
 data_correction/goalkeeper_trackers/goalkeeper_tracks.csv
 
+# ball detection exports ignore
+ball_detection/export/*
+possesion_algorithms/gap_lgbm/cache/gap_lgbm_0f0f3b722904cacd.npz

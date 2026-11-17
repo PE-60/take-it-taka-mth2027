@@ -1,0 +1,63 @@
+{
+ "name": "lh_balldet_gk_dead__bd_match_tol15__bd_min_confidence0.5",
+ "algorithm": "lh_balldet_gk_dead",
+ "class": "LinkHoernigAltBallDetGkDead",
+ "description": "lh_balldet with corrected goalkeeper tracks from goalkeeper_tracks.csv; alive intervals of dead_ball.json, D on dead balls; tactical",
+ "dead_ball": true,
+ "source": "tactical",
+ "params": {
+  "t_p": 1.0,
+  "t_a": 2.5,
+  "horizon_s": 1.0,
+  "kick_win": 3,
+  "min_hold_s": 0.5,
+  "attributions_json": "/home/pete/Projects/FC_Barca_Hackathon/take-it-taka-mth2027/ball_detection/export/touch_attributions.json",
+  "bd_min_confidence": 0.5,
+  "bd_match_tol": 15,
+  "kick_method": "export",
+  "kick_accel_m_s2": 4.0,
+  "kick_prominence": 3.0,
+  "kick_min_width_s": 0.0,
+  "kick_max_width_s": 0.4,
+  "kick_smooth_s": 0.08,
+  "kick_refractory_s": 0.3,
+  "kick_min_rise": 3.0,
+  "goalkeeper_csv": "/home/pete/Projects/FC_Barca_Hackathon/take-it-taka-mth2027/data_correction/goalkeeper_trackers/goalkeeper_tracks.csv",
+  "raw_gk_trackers": "24,46"
+ },
+ "created": "2026-11-17T19:35:04",
+ "inputs": {
+  "tactical": {
+   "from": "raw data",
+   "path": "data/tactical/BAR-ATH_tactical_atd.txt",
+   "frames": [
+    0,
+    199318
+   ]
+  },
+  "dead_ball": {
+   "path": "dead_ball_investigation/dead_ball.json",
+   "frames": 106888,
+   "created": null
+  }
+ },
+ "frames": 199319,
+ "covered": 199319,
+ "labelled_runs": 111,
+ "from_broadcast": 0,
+ "counts": {
+  "H": 48694,
+  "A": 35726,
+  "D": 106888,
+  "X": 8011
+ },
+ "public_gt": {
+  "gt": "BAR-ATH_possession_gt_public.csv",
+  "spell_f1_mean": 0.5894736842105264,
+  "macro_f1": 0.8654753436459481,
+  "accuracy": 0.8601333333333333,
+  "n_graded": 7500
+ },
+ "decisions": "lh_balldet_gk_dead__bd_match_tol15__bd_min_confidence0.5.decisions.json",
+ "n_switches": 304
+}

@@ -12,7 +12,7 @@
   --fg:#e8eaed; --muted:#9aa0a8; --dim:#5f656d;
   --home:#eb4646; --away:#32aaeb; --dead:#bdbdbd; --none:#4a4e55;
   --good:#5adc5a; --warn:#f5d73c; --bad:#f03c3c;
-  --ring:#ffe600; --kick:#ffc800; --jump:#c850ff; --churn:#ff8cc8; --lost:#f03c3c; --bolt:#e650e6; --air:#78dcff;
+  --ring:#ffe600; --kick:#ffc800; --kickex:#5adcff; --jump:#c850ff; --churn:#ff8cc8; --lost:#f03c3c; --bolt:#e650e6; --air:#78dcff;
   --throw:#3cc8ff; --corner:#ffc83c; --goalkick:#ff78c8; --freekick:#5adc5a; --kickoff:#ffffff;
   --dbview:#ff9f40; --dbball:#c88cff; --dbstill:#5fd3a0; --dbbase:#8a8f96; --off:#2ee6d6;
   font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; font-size:13px; line-height:1.35;
@@ -123,7 +123,10 @@ textarea{width:100%;background:var(--panel2);border:1px solid var(--line2);borde
       <option value="gt_change">GT transitions</option>
       <option value="restart">restarts (dead ball ends)</option>
       <option value="dead">dead ball, derived (interval starts)</option>
-      <option value="kick">kicks</option>
+      <option value="kick">kicks (‖Δv‖ peak)</option>
+      <option value="kick_extrema">kicks (extrema aₓ/aᵧ)</option>
+      <option value="balldet">ball detection (kick contacts)</option>
+      <option value="alg_switch">algorithm possession switches (lh_balldet trace)</option>
       <option value="referee">AR flag signals</option>
       <option value="lost">ball lost (stretch starts)</option>
       <option value="off">ball off pitch, x or y ∉ [-0.002, 1.002] for &gt; 1 s (stretch starts)</option>
@@ -185,7 +188,11 @@ textarea{width:100%;background:var(--panel2);border:1px solid var(--line2);borde
     <button id="bRows">rows ▾</button><div id="rowpop"></div>
     <span class="lbl">step events</span>
     <select id="stepType">
-      <option value="restart">restarts</option><option value="dead">dead ball (derived)</option><option value="gt_change">GT transitions</option><option value="kick">kicks</option>
+      <option value="restart">restarts</option><option value="dead">dead ball (derived)</option><option value="gt_change">GT transitions</option>
+      <option value="kick">kicks ‖Δv‖</option>
+      <option value="kick_extrema">kicks extrema</option>
+      <option value="balldet">ball detection</option>
+      <option value="alg_switch">alg switches</option>
       <option value="referee">AR flags</option>
       <option value="lost">ball lost</option><option value="off">ball off pitch</option><option value="jump">teleports</option><option value="churn">vanish/appear</option><option value="cand">candidate queue</option>
     </select>
@@ -245,6 +252,120 @@ class DataSet {
 // Event lists worked out from the export: kicks, lost ball stretches, jumps and so on.
 // All frame indices are relative to the export.
 const OFF_LO = -0.002, OFF_HI = 1.002, OFF_MIN_S = 1;
+
+/** Client-side kick diagnostics mirroring ball_detection.kicks (extrema method).
+ *  Uses a *local* prominence window so a full match stays O(n·W), not O(n²). */
+const KICK_EXTREMA_DEFAULTS = {
+  prominence: 3.0, minWidthS: 0.0, maxWidthS: 0.40, smoothS: 0.08, refractoryS: 0.3,
+  promWindowS: 1.0,
+};
+function computeKickDiagnostics(ds, opts = {}) {
+  const n = ds.n, fps = ds.fps, pitch = ds.pitch || [105, 68];
+  const p = { ...KICK_EXTREMA_DEFAULTS, ...opts };
+  const ax = new Float64Array(n), ay = new Float64Array(n), mag = new Float64Array(n);
+  ax.fill(NaN); ay.fill(NaN); mag.fill(NaN);
+  let pvx = NaN, pvy = NaN;
+  for (let r = 0; r < n; r++) {
+    const b = ds.ball(r), pb = r > 0 ? ds.ball(r - 1) : null;
+    let vx = NaN, vy = NaN;
+    if (b && pb) {
+      vx = (b.x - pb.x) * pitch[0] * fps;
+      vy = (b.y - pb.y) * pitch[1] * fps;
+    }
+    if (Number.isFinite(vx) && Number.isFinite(vy) && Number.isFinite(pvx) && Number.isFinite(pvy)) {
+      ax[r] = (vx - pvx) * fps;
+      ay[r] = (vy - pvy) * fps;
+      mag[r] = Math.hypot(ax[r], ay[r]);
+    }
+    if (b && Number.isFinite(b.acc)) mag[r] = b.acc;
+    pvx = vx; pvy = vy;
+  }
+  const smoothW = Math.max(1, Math.round(p.smoothS * fps));
+  const sx = movingAverage(ax, smoothW), sy = movingAverage(ay, smoothW);
+  const minW = p.minWidthS * fps;
+  const maxW = p.maxWidthS == null || p.maxWidthS < 0 ? null : p.maxWidthS * fps;
+  const win = Math.max(2, Math.round(p.promWindowS * fps));
+  const kick = new Uint8Array(n);
+  for (const series of [sx, sy]) {
+    markExtremaKicks(series, kick, p.prominence, minW, maxW, win, +1);
+    markExtremaKicks(series, kick, p.prominence, minW, maxW, win, -1);
+  }
+  const refractory = Math.round(p.refractoryS * fps);
+  const kickExtrema = [];
+  let last = -1e9;
+  for (let i = 0; i < n; i++) {
+    if (!kick[i]) continue;
+    if (i - last < refractory) continue;
+    kickExtrema.push(i);
+    last = i;
+  }
+  return { accelMag: mag, accelX: ax, accelY: ay, kickExtrema, params: p };
+}
+function movingAverage(x, win) {
+  const n = x.length, out = new Float64Array(n); out.fill(NaN);
+  if (win <= 1) { out.set(x); return out; }
+  let w = win | 0; if (w % 2 === 0) w++;
+  const pad = (w / 2) | 0;
+  // Running sum over finite samples — O(n).
+  let s = 0, c = 0;
+  const add = (j, sign) => {
+    if (j < 0 || j >= n || !Number.isFinite(x[j])) return;
+    s += sign * x[j]; c += sign;
+  };
+  for (let j = -pad; j <= pad; j++) add(j, 1);
+  for (let i = 0; i < n; i++) {
+    if (i) { add(i - pad - 1, -1); add(i + pad, 1); }
+    if (c) out[i] = s / c;
+  }
+  return out;
+}
+/** Local extrema with local prominence; ``sign`` +1 = maxima, -1 = minima. Writes into ``kick``. */
+function markExtremaKicks(y, kick, promMin, minW, maxW, win, sign) {
+  const n = y.length;
+  for (let i = 1; i < n - 1; i++) {
+    const yi = y[i];
+    if (!Number.isFinite(yi)) continue;
+    const left = y[i - 1], right = y[i + 1];
+    if (!Number.isFinite(left) || !Number.isFinite(right)) continue;
+    const v = sign * yi, vl = sign * left, vr = sign * right;
+    if (!(v >= vl && v >= vr && (v > vl || v > vr))) continue;
+    // Local prominence: drop from peak to the higher of the mins in ±win (in signed space).
+    let leftMin = v, rightMin = v;
+    const lo = Math.max(0, i - win), hi = Math.min(n - 1, i + win);
+    for (let j = i - 1; j >= lo; j--) {
+      if (!Number.isFinite(y[j])) break;
+      const sj = sign * y[j];
+      if (sj > v) break;
+      if (sj < leftMin) leftMin = sj;
+    }
+    for (let j = i + 1; j <= hi; j++) {
+      if (!Number.isFinite(y[j])) break;
+      const sj = sign * y[j];
+      if (sj > v) break;
+      if (sj < rightMin) rightMin = sj;
+    }
+    const prom = v - Math.max(leftMin, rightMin);
+    if (prom < promMin) continue;
+    // Half-prominence width within the same window.
+    const level = v - 0.5 * prom;
+    let leftI = i, rightI = i;
+    for (let j = i; j >= lo; j--) {
+      if (!Number.isFinite(y[j])) break;
+      leftI = j;
+      if (sign * y[j] <= level) break;
+    }
+    for (let j = i; j <= hi; j++) {
+      if (!Number.isFinite(y[j])) break;
+      rightI = j;
+      if (sign * y[j] <= level) break;
+    }
+    const width = rightI - leftI;
+    if (width < minW) continue;
+    if (maxW != null && width > maxW) continue;
+    kick[i] = 1;
+  }
+}
+
 class EventIndex {
   constructor(ds) {
     this.ds = ds;
@@ -278,6 +399,34 @@ class EventIndex {
     this.refereeFrames = [];
     this.refereeSignalFrames = []; // non-none only (for step / candidates)
     if (m.referee && m.referee.events) this.ingestRefereeEvents(m.referee.events, { absolute: false });
+    // ball_detection Stage B/C sidecar (pixel ball + touch team), absolute video frames.
+    this.balldetByFrame = new Map();
+    this.balldetFrames = [];
+    this.balldetContactFrames = [];
+    // lh_balldet (etc.) possession-switch traces from evaluation/results/<name>.decisions.json
+    this.algSwitchByFrame = new Map();
+    this.algSwitchFrames = [];
+    // Kick-method comparison — filled asynchronously so boot / video load stay snappy.
+    this.kickPeak = this.kick;
+    this.accelMag = null;
+    this.accelX = null;
+    this.accelY = null;
+    this.kickExtrema = new Set();
+    this.kickExtremaFrames = [];
+    this.kickDiag = null;
+    this.kickDiagReady = false;
+  }
+  /** Compute accel series + extrema kicks off the critical path (after video can start). */
+  buildKickDiagnostics(opts) {
+    const kd = computeKickDiagnostics(this.ds, opts);
+    this.accelMag = kd.accelMag;
+    this.accelX = kd.accelX;
+    this.accelY = kd.accelY;
+    this.kickExtrema = new Set(kd.kickExtrema);
+    this.kickExtremaFrames = kd.kickExtrema;
+    this.kickDiag = kd;
+    this.kickDiagReady = true;
+    return kd;
   }
   /** Ingest viewer events. absolute=true means e.f / abs_f is a video frame index. */
   ingestRefereeEvents(events, { absolute = false } = {}) {
@@ -309,13 +458,32 @@ class EventIndex {
   }
   list(name) {
     switch (name) {
-      case 'restart': return this.restartFrames; case 'gt_change': return this.gtChanges; case 'kick': return [...this.kick].sort((a, b) => a - b);
+      case 'restart': return this.restartFrames; case 'gt_change': return this.gtChanges;
+      case 'kick': return [...this.kick].sort((a, b) => a - b);
+      case 'kick_extrema': return this.kickExtremaFrames || [];
       case 'lost': return this.lostStarts; case 'jump': return this.jumpFrames; case 'churn': return this.churnFrames;
       case 'referee': return this.refereeSignalFrames.length ? this.refereeSignalFrames : this.refereeFrames;
+      case 'balldet': return this.balldetContactFrames.length ? this.balldetContactFrames : this.balldetFrames;
+      case 'alg_switch': return this.algSwitchFrames || [];
       case 'dead': return this.deadStarts || [];
       case 'off': return this.ballOffStarts;
     }
     return [];
+  }
+  /** Ingest ball_detection.json events. absolute=true means e.f is a video frame index. */
+  ingestBalldetEvents(events, { absolute = true } = {}) {
+    if (!events || !events.length) return;
+    const n = this.ds.n, start = this.ds.start;
+    for (const e of events) {
+      let r = absolute ? +e.f - start : +e.f;
+      if (!Number.isFinite(r) || r < 0 || r >= n) continue;
+      if (!this.balldetByFrame.has(r)) this.balldetByFrame.set(r, []);
+      this.balldetByFrame.get(r).push(e);
+      this.balldetFrames.push(r);
+      if (e.kind === 'contact') this.balldetContactFrames.push(r);
+    }
+    this.balldetFrames = [...new Set(this.balldetFrames)].sort((a, b) => a - b);
+    this.balldetContactFrames = [...new Set(this.balldetContactFrames)].sort((a, b) => a - b);
   }
 }
 const deriveEvents = ds => new EventIndex(ds);
@@ -685,7 +853,7 @@ let armed = null, pendingClicks = [], magnify = false, loop = null;
 let candFrames = [], candType = 'gt_change', includeHandled = false;
 // clear() fires 'pv:changed' so an embedding page (match_dual.html) knows to redraw its strips
 let ROWS = [], rowCache = new (class extends Map { clear() { super.clear(); window.dispatchEvent(new Event('pv:changed')); } })(), tlDrag = null, slotsOpen = false;
-let RH = 11, OVH = 10, BANDH = 7;
+let RH = 11, OVH = 10, BANDH = 7, WAVEH = 52;
 const RG = 2, GG = 9, FLAG = 14;
 // Things that can show up in the overview at the top of the timeline. GT always comes first.
 // A strip just reuses one of the rows, a band is a per bin summary from aggregateBands.
@@ -702,15 +870,18 @@ const OVERVIEW_DEFAULT = ['GT', 'DEAD BALL', 'restarts', 'ball lost'];
 const LAYERS = [
   ['pitch', 'pitch lines', true], ['players', 'players', true], ['ring', 'possession ring', true],
   ['ball', 'ball', true], ['trail', 'ball trail (1.5 s)', true], ['future', 'ball future (1 s)', true],
-  ['events', 'event marks (kick / jump / vanish)', true], ['referee', 'AR flag signals', true], ['ann', 'annotation marks', true], ['regions', 'dominant regions', false], ['hull', 'team hulls', false],
+  ['events', 'event marks (kick / jump / vanish)', true], ['balldet', 'ball detection (kick windows)', true],
+  ['algtrace', 'lh_balldet switch reasons', true],
+  ['referee', 'AR flag signals', true], ['ann', 'annotation marks', true], ['regions', 'dominant regions', false], ['hull', 'team hulls', false],
   ['arrows', 'attack direction', true], ['labels', 'slot numbers', true],
 ];
-const LAYER_PRESETS = { 'everything': null, 'players + ball': ['pitch', 'players', 'ball', 'labels'], 'referee flags': ['pitch', 'referee'], 'clean video': [] };
+const LAYER_PRESETS = { 'everything': null, 'players + ball': ['pitch', 'players', 'ball', 'labels'], 'ball detection': ['pitch', 'players', 'ball', 'balldet'], 'alg switches': ['pitch', 'players', 'ball', 'algtrace'], 'referee flags': ['pitch', 'referee'], 'clean video': [] };
 // algorithm rows (and their Δ rows) are shown whatever the preset; pick them under "algorithms ▾"
 const ROW_PRESETS = {
   'all': null,
-  'possession': ['GT', 'SEGMENT', 'MINE', 'RESTART', 'KICK'],
-  'events': ['GT', 'RESTART', 'KICK', 'AR FLAGS', 'ANN EVENTS', 'BOOKMARK'],
+  'possession': ['GT', 'SEGMENT', 'MINE', 'RESTART', 'KICK ‖Δv‖', 'KICK EXTREMA'],
+  'kicks / accel': ['GT', 'KICK ‖Δv‖', 'KICK EXTREMA', 'BALL ACCEL', 'BALL ACCEL aₓ aᵧ', 'BALL SPEED'],
+  'events': ['GT', 'RESTART', 'KICK ‖Δv‖', 'KICK EXTREMA', 'AR FLAGS', 'ANN EVENTS', 'BOOKMARK'],
   'data quality': ['GT', 'BALL LOST', 'BALL JUMP', 'PLAYER JUMP', 'DROPOUT <0.5 s', 'VANISH/APPEAR', 'COUNT ≠ 22', '› BOLT', 'HOMOGRAPHY', 'ANN DATA'],
   'annotation': ['GT', 'SEGMENT', 'MINE', 'ANN EVENTS', 'ANN DATA', 'SEGMENT B', 'ANN B', 'BOOKMARK'],
   'dead ball': ['GT', 'DEAD BALL', 'DEAD (BASELINE)', 'NO VIEW (HOM ∅ ∩ ≠22)', 'BALL LOST T∩B', 'NO COUNTERPART', 'OFF PITCH T (ELSE B)', 'STILL-BALL GAP', 'RESTART', 'BALL LOST', 'BALL OFF PITCH', 'COUNT ≠ 22', 'HOMOGRAPHY'],
@@ -782,6 +953,28 @@ async function loadDeadBall() {
   }
   console.warn('[dead ball]', E.deadMissing, '— run:', DEAD_BALL_HINT);
 }
+async function loadBalldetSidecars() {
+  // Stage B/C: pixel ball + touch team from ball_detection/run_attribute.py
+  const src = (ds.meta.source || 'tactical');
+  const candidates = [
+    q.get('balldet'),
+    exportDir + '/ball_detection.json',
+    'export/ball_detection.json',
+    '../ball_detection/export/ball_detection.json',
+    'export/ball_detection_' + src + '.json',
+  ].filter(Boolean);
+  for (const url of candidates) {
+    const doc = await tryFetchJson(url);
+    if (!doc || !doc.events || !doc.events.length) continue;
+    E.balldetByFrame = new Map();
+    E.balldetFrames = [];
+    E.balldetContactFrames = [];
+    E.ingestBalldetEvents(doc.events, { absolute: true });
+    console.info('[balldet] loaded', url, '→', E.balldetFrames.length, 'frames,', E.balldetContactFrames.length, 'contacts');
+    return;
+  }
+  console.warn('[balldet] no ball_detection.json sidecar (run: python -m ball_detection.run_attribute)');
+}
 
 // ---------------------------------------------------------------- possession algorithms (evaluation/results/*.csv)
 // The picker under "algorithms ▾" lists the CSVs, each one picked becomes a label row plus a Δ row
@@ -821,6 +1014,37 @@ function algHint(m) {
   const s = m.public_gt && Number.isFinite(m.public_gt.spell_f1_mean) ? ` · spellF1 ${m.public_gt.spell_f1_mean.toFixed(3)}` : '';
   return `${m.dead_ball ? 'alive intervals only' : 'whole video'} · ${m.source || '?'}${s}`;
 }
+async function loadAlgorithmDecisions(name, csvUrl) {
+  // Sidecar written by possesion_algorithms.runner when the algo exposes take_decisions().
+  const base = (csvUrl || '').replace(/\.csv(\?.*)?$/i, '');
+  const candidates = [
+    base + '.decisions.json',
+    RESULTS_DIR_URL + name + '.decisions.json',
+    '../evaluation/results/' + name + '.decisions.json',
+  ].filter(Boolean);
+  for (const u of candidates) {
+    const doc = await tryFetchJson(u);
+    if (doc && Array.isArray(doc.switches)) return doc;
+  }
+  return null;
+}
+function rebuildAlgSwitchIndex() {
+  E.algSwitchByFrame = new Map();
+  E.algSwitchFrames = [];
+  for (const name of ALG.on) {
+    const a = ALG.loaded.get(name);
+    if (!a || !a.decisions || !a.decisions.switches) continue;
+    for (const s of a.decisions.switches) {
+      const r = +s.f - ds.start;
+      if (!Number.isFinite(r) || r < 0 || r >= ds.n) continue;
+      const rec = { ...s, algorithm: name };
+      if (!E.algSwitchByFrame.has(r)) E.algSwitchByFrame.set(r, []);
+      E.algSwitchByFrame.get(r).push(rec);
+      E.algSwitchFrames.push(r);
+    }
+  }
+  E.algSwitchFrames = [...new Set(E.algSwitchFrames)].sort((a, b) => a - b);
+}
 async function loadAlgorithm(name, { url = null, text = null } = {}) {
   if (ALG.loaded.has(name) && !text) return ALG.loaded.get(name);
   const it = ALG.index.find(x => x.name === name);
@@ -830,8 +1054,12 @@ async function loadAlgorithm(name, { url = null, text = null } = {}) {
     text = await r.text();
   }
   const frames = parseLabelCsv(text), codes = codesForRows(frames, ds.start, ds.n, await rowMapping());
-  const a = { name, meta: it ? it.meta : null, frames: frames.length, codes };
-  ALG.loaded.set(name, a); return a;
+  const csvUrl = url || (it && it.url) || (RESULTS_DIR_URL + name + '.csv');
+  const decisions = await loadAlgorithmDecisions(name, csvUrl);
+  const a = { name, meta: it ? it.meta : null, frames: frames.length, codes, decisions };
+  ALG.loaded.set(name, a);
+  if (decisions) console.info('[algtrace]', name, '→', decisions.n_switches || decisions.switches.length, 'switches');
+  return a;
 }
 function refCodes() {
   if (ALG.ref === 'GT') return gtCodes;
@@ -843,6 +1071,7 @@ function algsChanged() {
   ALG.version++; ALG.error = null;
   if (ALG.ref !== 'GT' && ALG.ref !== 'none' && !ALG.on.includes(ALG.ref)) ALG.ref = gtCodes ? 'GT' : 'none';
   if (ALG_KEY) try { localStorage.setItem(ALG_KEY, JSON.stringify({ on: ALG.on, ref: ALG.ref })); } catch (e) {}
+  if (E) rebuildAlgSwitchIndex();
   if (!ROWS.length) return;
   buildRows(); renderCandOptions(); buildCandidates(); buildLegend(); drawTimeline(); draw();
 }
@@ -919,15 +1148,28 @@ async function load() {
   E = deriveEvents(ds);
   await loadRefereeSidecars();
   await loadDeadBall();
+  await loadBalldetSidecars();
   gtCodes = meta.gt ? Uint8Array.from(meta.gt, c => LABEL_CODE[c] || 0) : null;
   if (!gtCodes) ALG.ref = 'none';
   if (ALG_KEY) { let saved = null; try { saved = JSON.parse(localStorage.getItem(ALG_KEY)); } catch (e) {} await restoreAlgorithms(saved); }
   store = new AnnotationStore({ get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } }, 'pv2:' + exportDir, ds);
   const nRef = E.refereeFrames.length;
-  $('#srcName').textContent = `${meta.source} · frames ${meta.start}-${meta.end} · ${(ds.n / ds.fps / 60).toFixed(1)} min` + (nRef ? ` · AR boxes on ${nRef} frames` : '') + (E.dead ? ` · ${E.deadStarts.length} dead-ball intervals` : ` · no dead-ball rows (${E.deadMissing}; run ${DEAD_BALL_HINT})`);
+  const nBall = E.balldetContactFrames.length;
+  $('#srcName').textContent = `${meta.source} · frames ${meta.start}-${meta.end} · ${(ds.n / ds.fps / 60).toFixed(1)} min` + (nRef ? ` · AR boxes on ${nRef} frames` : '') + (nBall ? ` · balldet contacts ${nBall}` : '') + (E.dead ? ` · ${E.deadStarts.length} dead-ball intervals` : ` · no dead-ball rows (${E.deadMissing}; run ${DEAD_BALL_HINT})`);
   document.title = `Match viewer · ${meta.source}`;
   const v = $('#v'); v.src = meta.video;
   v.addEventListener('loadedmetadata', init, { once: true });
+  // Accel / extrema kicks after the video can load (was freezing boot on long exports).
+  const runKickDiag = () => {
+    try {
+      const t0 = performance.now();
+      E.buildKickDiagnostics();
+      console.info('[kickdiag]', E.kickExtremaFrames.length, 'extrema kicks in', (performance.now() - t0).toFixed(0), 'ms');
+      if (ROWS.length) { rowCache.clear(); buildCandidates(); buildLegend(); drawTimeline(); updateInfo(); }
+    } catch (err) { console.warn('[kickdiag] failed', err); }
+  };
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(runKickDiag, { timeout: 1500 });
+  else setTimeout(runKickDiag, 0);
 }
 
 function init() {
@@ -1198,13 +1440,19 @@ function candidateList(t) {
       label: r => `${rn} ${RESULT_LABELS[ref[r]]} · ${name} ${RESULT_LABELS[a.codes[r]] || '-'}` };
   }
   const L = {
-    gt_change: () => E.gtChanges, restart: () => E.restartFrames, kick: () => E.list('kick'), referee: () => E.list('referee'),
+    gt_change: () => E.gtChanges, restart: () => E.restartFrames, kick: () => E.list('kick'), kick_extrema: () => E.list('kick_extrema'),
+    referee: () => E.list('referee'),
+    balldet: () => E.list('balldet'), alg_switch: () => E.list('alg_switch'),
     lost: () => E.lostStarts, off: () => E.ballOffStarts, jump: () => E.jumpFrames, churn: () => E.churnFrames, dead: () => E.list('dead'),
     ambig: () => segmentStarts(r => alive(r) && ringCount(r) !== -1 && ringCount(r) !== 1),
   };
   const label = {
     gt_change: r => `${gt(r - 1)} → ${gt(r)}`,
-    restart: r => { const f = E.flags.find(x => x.r === r); return f ? f.name : 'GT dead → alive'; }, kick: r => `ball ${ds.ball(r) ? ds.ball(r).sf.toFixed(0) : '?'} m/s`,
+    restart: r => { const f = E.flags.find(x => x.r === r); return f ? f.name : 'GT dead → alive'; },
+    kick: r => { const b = ds.ball(r); const a = E.accelMag ? E.accelMag[r] : (b && b.acc); return `‖a‖ ${Number.isFinite(a) ? a.toFixed(1) : '?'} · ${b ? b.sf.toFixed(0) : '?'} m/s`; },
+    kick_extrema: r => { const a = E.accelMag ? E.accelMag[r] : NaN; const ax = E.accelX ? E.accelX[r] : NaN; const ay = E.accelY ? E.accelY[r] : NaN; return `‖a‖ ${fmt(a)} · aₓ ${fmt(ax)} aᵧ ${fmt(ay)}`; },
+    balldet: r => { const dets = E.balldetByFrame.get(r) || []; const c = dets.find(d => d.kind === 'contact') || dets[0]; return c ? `${c.kind}${c.team ? ' ' + c.team : ''} ${(c.confidence || c.score || 0).toFixed(2)}` : 'balldet'; },
+    alg_switch: r => { const sw = (E.algSwitchByFrame.get(r) || [])[0]; return sw ? `${sw.algorithm || ''} ${sw.from || '∅'}→${sw.to} · ${sw.reason}` : 'switch'; },
     referee: r => { const dets = E.refereeByFrame.get(r) || []; return dets.map(d => `${d.official_id || 'AR'} ${d.signal}`).join(' · ') || 'flag'; },
     lost: r => { let e = r; while (e < ds.n && !ds.ball(e)) e++; return `${((e - r) / ds.fps).toFixed(1)} s`; },
     off: r => { let e = r; while (e < ds.n && E.ballOff[e]) e++; const b = ds.ball(r); return `${((e - r) / ds.fps).toFixed(1)} s · x ${b.x.toFixed(2)} y ${b.y.toFixed(2)}`; },
@@ -1300,7 +1548,9 @@ const RESTART_GLYPHS = { 'Throw-In': ['diamond', col('throw')], 'Corner': ['circ
 function buildLegend() {
   const el = $('#legend'); el.innerHTML = '';
   const items = [['tri_up', col('good'), 'GT dead → alive', 'RESTART'], ...Object.entries(RESTART_GLYPHS).map(([n, [g, c]]) => [g, c, n.toLowerCase(), 'RESTART']), ['pin', '#fff', 'bookmark', 'BOOKMARK'],
-    [null, col('kick'), 'kick (‖Δv_xy‖ peak ≥ 4)', 'KICK'], [null, col('lost'), 'ball lost', 'BALL LOST'], [null, col('off'), 'ball off pitch', 'BALL OFF PITCH'], [null, col('jump'), 'teleport', 'PLAYER JUMP'], [null, col('churn'), 'vanish / appear', 'VANISH/APPEAR'], [null, col('bolt'), `› Bolt ${ds.meta.bolt} m/s`, '› BOLT'], [null, TEAM.H, 'Barcelona', 'GT'], [null, TEAM.A, 'Athletic', 'GT'], [null, TEAM.D, 'dead ball', 'GT']];
+    [null, col('kick'), 'kick ‖Δv‖ peak ≥ 4', 'KICK ‖Δv‖'], [null, col('kickex'), 'kick extrema (aₓ/aᵧ prominence)', 'KICK EXTREMA'],
+    [null, '#c8dcff', 'ball accel ‖a‖ graph', 'BALL ACCEL'],
+    [null, col('lost'), 'ball lost', 'BALL LOST'], [null, col('off'), 'ball off pitch', 'BALL OFF PITCH'], [null, col('jump'), 'teleport', 'PLAYER JUMP'], [null, col('churn'), 'vanish / appear', 'VANISH/APPEAR'], [null, col('bolt'), `› Bolt ${ds.meta.bolt} m/s`, '› BOLT'], [null, TEAM.H, 'Barcelona', 'GT'], [null, TEAM.A, 'Athletic', 'GT'], [null, TEAM.D, 'dead ball', 'GT']];
   if (E.dead) items.push([null, col('dbview'), 'no view: broadcast hom ∅ ∩ ≠22', 'NO VIEW (HOM ∅ ∩ ≠22)'], [null, col('dbball'), 'ball lost T∩B', 'BALL LOST T∩B'],
     [null, col('off'), 'off pitch: tactical ball, else broadcast', 'OFF PITCH T (ELSE B)'],
     [null, col('dbstill'), 'gap with the ball still', 'STILL-BALL GAP'], [null, col('dbbase'), 'dead ball before steps 1-3', 'DEAD (BASELINE)']);
@@ -1334,6 +1584,8 @@ function draw() {
   if (!Hm) {
     ctx.fillStyle = 'rgba(240,60,60,.9)'; ctx.font = '500 14px Inter';
     ctx.fillText('no homography on this frame', 16, ov.height - 16);
+    if (layers.balldet) drawBalldet(ctx, r);
+    if (layers.algtrace) drawAlgTrace(ctx, r, null, null);
     if (layers.referee) drawReferee(ctx, r);
     drawPossCard(r, b, tp, 0, 0); return;
   }
@@ -1366,9 +1618,100 @@ function draw() {
   }
   if (pinned.length === 2) { const a = ds.slot(r, pinned[0]), c = ds.slot(r, pinned[1]); if (a && c) { const pa = ds.proj(Hm, a.x, a.y), pc = ds.proj(Hm, c.x, c.y); ctx.setLineDash([4, 4]); ctx.strokeStyle = '#fff'; poly(ctx, [pa, pc]); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle = '#fff'; ctx.font = '500 12px Inter'; ctx.fillText(ds.metres(a, c).toFixed(1) + ' m', (pa[0] + pc[0]) / 2 + 4, (pa[1] + pc[1]) / 2 - 6); } }
   if (b && layers.ball) { poly(ctx, groundCircle(Hm, b.x, b.y, ds.meta.ball_radius, 16), true); ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke(); ctx.lineWidth = 1.2; const pb = ds.ball(r - 1); if (pb && b.sf > 1) { const c = ds.proj(Hm, b.x, b.y), e = ds.proj(Hm, b.x + (b.x - pb.x) * 10, b.y + (b.y - pb.y) * 10); ctx.strokeStyle = '#fff'; poly(ctx, [c, e]); ctx.stroke(); } }
+  if (layers.balldet) drawBalldet(ctx, r);
+  if (layers.algtrace) drawAlgTrace(ctx, r, Hm, b);
   if (layers.referee) drawReferee(ctx, r);
   if (layers.ann) { drawAnn(ctx, Hm, r, 'A'); drawAnn(ctx, Hm, r, 'B'); drawPending(ctx, Hm); }
   drawPossCard(r, b, tp, inH, inA);
+}
+function drawAlgTrace(ctx, r, Hm, b) {
+  if (!E || !E.algSwitchByFrame) return;
+  const sw = E.algSwitchByFrame.get(r) || [];
+  // Fade rings around the ball at each recent switch (±1.2 s).
+  if (Hm) {
+    for (const [fr, list] of E.algSwitchByFrame) {
+      const age = (r - fr) / ds.fps;
+      if (age < 0 || age >= 1.2) continue;
+      const bb = ds.ball(fr) || b;
+      if (!bb) continue;
+      for (const s of list) {
+        const colr = s.reason === 'balldet_fallback' ? '#ffdc00' : (TEAM[s.to] || '#ffffff');
+        ctx.globalAlpha = 1 - age / 1.2;
+        poly(ctx, groundCircle(Hm, bb.x, bb.y, 0.8 + 2.5 * age), true);
+        ctx.strokeStyle = colr; ctx.lineWidth = 2; ctx.stroke();
+        ctx.globalAlpha = 1; ctx.lineWidth = 1.2;
+      }
+    }
+  }
+  ctx.save();
+  ctx.font = '600 12px Inter';
+  const boxH = sw.length ? 28 + sw.length * 34 : 46;
+  ctx.fillStyle = 'rgba(0,0,0,.62)';
+  ctx.fillRect(8, 96, Math.min(ov.width - 16, 520), boxH);
+  ctx.fillStyle = '#ffe08a';
+  if (!E.algSwitchFrames.length) {
+    ctx.fillText('algtrace: enable lh_balldet in algorithms ▾ (needs .decisions.json)', 16, 116);
+    ctx.fillStyle = '#bbb';
+    ctx.fillText('re-run: python -m possesion_algorithms.run lh_balldet', 16, 134);
+  } else if (!sw.length) {
+    const nearest = E.algSwitchFrames.reduce((best, f) => best === null || Math.abs(f - r) < Math.abs(best - r) ? f : best, null);
+    ctx.fillText(`algtrace: no switch on frame ${ds.start + r}`, 16, 116);
+    if (nearest !== null) {
+      const s = (E.algSwitchByFrame.get(nearest) || [])[0];
+      ctx.fillText(`nearest @ ${ds.start + nearest}: ${(s && s.reason) || '?'}`, 16, 134);
+    }
+  } else {
+    ctx.fillText(`algtrace · frame ${ds.start + r}`, 16, 116);
+    let y = 136;
+    for (const s of sw) {
+      const used = s.bd_used ? 'BD USED' : 'BD not used';
+      ctx.fillStyle = s.reason === 'balldet_fallback' ? '#ffdc00' : '#9ad0ff';
+      ctx.fillText(`${s.algorithm || ''} ${(s.from || '∅')}→${s.to} · ${s.reason} · ${used}`, 16, y);
+      y += 16;
+      ctx.fillStyle = '#ddd';
+      const detail = (s.detail || '').slice(0, 78);
+      ctx.fillText(detail, 16, y);
+      y += 18;
+    }
+  }
+  ctx.restore();
+}
+function drawBalldet(ctx, r) {
+  if (!E || !E.balldetByFrame) return;
+  const dets = E.balldetByFrame.get(r) || [];
+  ctx.save();
+  ctx.font = '600 13px Inter';
+  ctx.fillStyle = 'rgba(0,0,0,.55)';
+  ctx.fillRect(8, 44, 300, dets.length ? 28 : 46);
+  ctx.fillStyle = '#7ec8ff';
+  if (!E.balldetFrames.length) {
+    ctx.fillText('balldet: no ball_detection.json', 16, 64);
+  } else if (!dets.length) {
+    const nearest = E.balldetFrames.reduce((best, f) => best === null || Math.abs(f - r) < Math.abs(best - r) ? f : best, null);
+    ctx.fillText(`balldet: none on frame ${ds.start + r}`, 16, 64);
+    if (nearest !== null) ctx.fillText(`nearest @ ${ds.start + nearest}`, 16, 82);
+  } else {
+    const c = dets.find(d => d.kind === 'contact');
+    ctx.fillText(c ? `balldet: ${c.team || '?'} conf ${(c.confidence || 0).toFixed(2)}` : `balldet: ${dets.length} blob(s)`, 16, 64);
+  }
+  ctx.restore();
+  for (const d of dets) {
+    const u = +d.u, v = +d.v;
+    if (!Number.isFinite(u) || !Number.isFinite(v)) continue;
+    const rad = Math.max(4, +(d.radius_px || 8));
+    const col = d.hex || (d.team === 'H' ? '#3c78c8' : d.team === 'A' ? '#c82828' : '#7ec8ff');
+    const contact = d.kind === 'contact';
+    ctx.beginPath(); ctx.arc(u, v, rad + (contact ? 3 : 0), 0, 7);
+    ctx.strokeStyle = '#000'; ctx.lineWidth = contact ? 5 : 3; ctx.stroke();
+    ctx.strokeStyle = col; ctx.lineWidth = contact ? 3 : 2; ctx.stroke();
+    ctx.beginPath(); ctx.arc(u, v, 2.5, 0, 7); ctx.fillStyle = col; ctx.fill();
+    if (contact) {
+      const lab = `touch ${d.team || '?'} ${(d.confidence || 0).toFixed(2)}${d.slot_id ? ' #' + d.slot_id : ''}`;
+      ctx.font = '700 14px Inter';
+      ctx.lineWidth = 3; ctx.strokeStyle = '#000'; ctx.strokeText(lab, u + rad + 6, v + 4);
+      ctx.fillStyle = col; ctx.fillText(lab, u + rad + 6, v + 4);
+    }
+  }
 }
 function drawReferee(ctx, r) {
   if (!E || !E.refereeByFrame) return;
@@ -1451,6 +1794,15 @@ function drawPossCard(r, b, tp, inH, inA) {
     const rows = ALG.on.map(n => { const l = algLetter(n, r), mark = !scored || n === ALG.ref ? '' : l === RESULT_LABELS[rc] ? `<span style="color:${col('good')}">✓</span>` : `<span style="color:${col('bad')}">✗</span>`; return `<div class="row"><span class="k mono" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${n}</span><span class="v"><b style="color:${TEAM[l] || TEAM.X}">${l || '-'}</b> ${mark}</span></div>`; }).join('');
     html += `<div class="card"><div class="lbl">algorithms${refName() ? ` <span class="hint" style="text-transform:none;letter-spacing:0">vs ${refName()}</span>` : ''}</div>${rows}</div>`;
   }
+  const switches = (E && E.algSwitchByFrame && E.algSwitchByFrame.get(r)) || [];
+  if (switches.length) {
+    const bits = switches.map(s => {
+      const used = s.bd_used ? 'ball_detection used' : 'ball_detection NOT used';
+      const conf = (s.bd_conf != null && Number.isFinite(+s.bd_conf)) ? ` · bd_conf ${(+s.bd_conf).toFixed(2)}` : '';
+      return `<div class="sub" style="margin-top:4px"><b>${s.from || '∅'}→${s.to}</b> · ${s.reason}<br>${used}${conf}<br>${s.detail || ''}</div>`;
+    }).join('');
+    html += `<div class="card" style="border-top:3px solid #ffdc00;max-width:340px"><div class="lbl">switch reason</div>${bits}</div>`;
+  }
   html += `<div class="card"><div class="lbl">ring</div><div class="row"><span class="k">within ${tp} m</span><span class="v"><span style="color:${TEAM.H}">H ${inH}</span> <span style="color:${TEAM.A}">A ${inA}</span></span></div></div>`;
   const seg = store.segmentAt(r); if (seg.state !== 'clear') { const dl = store.derivedLabel(r); const it = SCHEMA.state.items.find(i => i[0] === seg.state); html += `<div class="card" style="border-top:3px solid ${TEAM[dl]}"><div class="lbl">my reading</div><div class="big" style="color:${TEAM[dl]}">${dl}</div><div class="sub" style="color:${it[3]}">${it[2]}</div></div>`; }
   el.innerHTML = html;
@@ -1487,13 +1839,30 @@ function updateInfo() {
   $('#clkFrame').textContent = 'frame ' + f; $('#clkTime').textContent = `${String(Math.floor(t / 60)).padStart(2, '0')}:${(t % 60).toFixed(2).padStart(5, '0')}`;
   const h = ds.halfOf(f); let ht = ''; if (h) { const a = ds.meta.halves[h][0]; const s = (f - a) / ds.fps + (h === 2 ? 2700 : 0); ht = `${h === 1 ? '1st' : '2nd'} half ${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`; } $('#clkHalf').textContent = ht;
   const rows = []; const row = (k, v, c) => rows.push(`<div class="row"><span class="k">${k}</span><span class="v"${c ? ` style="color:${c}"` : ''}>${v}</span></div>`);
-  if (b) { row('ball', `${b.x.toFixed(3)}, ${b.y.toFixed(3)}${Number.isFinite(b.z) ? ' · z ' + b.z.toFixed(2) + ' m' : ''}`); row('ball speed frames / data', `${fmt(b.sf)} / ${fmt(b.sd)} m/s`); row('ball accel', `${fmt(b.acc)} m/s²`, E.kick.has(r) ? col('kick') : null); } else row('ball', 'not tracked', col('bad'));
+  if (b) {
+    row('ball', `${b.x.toFixed(3)}, ${b.y.toFixed(3)}${Number.isFinite(b.z) ? ' · z ' + b.z.toFixed(2) + ' m' : ''}`);
+    row('ball speed frames / data', `${fmt(b.sf)} / ${fmt(b.sd)} m/s`);
+    const am = E.accelMag ? E.accelMag[r] : b.acc;
+    const kickTag = E.kick.has(r) && E.kickExtrema && E.kickExtrema.has(r) ? 'both kicks'
+      : E.kick.has(r) ? '‖Δv‖ kick' : (E.kickExtrema && E.kickExtrema.has(r) ? 'extrema kick' : null);
+    row('ball accel ‖a‖', `${fmt(am)} m/s²${kickTag ? ' · ' + kickTag : ''}`,
+      E.kick.has(r) ? col('kick') : (E.kickExtrema && E.kickExtrema.has(r) ? col('kickex') : null));
+    if (E.accelX) row('ball accel aₓ aᵧ', `${fmt(E.accelX[r])} · ${fmt(E.accelY[r])} m/s²`);
+  } else row('ball', 'not tracked', col('bad'));
   const nH = PL.filter(p => ds.sideOf(p.k) === 'H').length, nA = PL.filter(p => ds.sideOf(p.k) === 'A').length;
   row('tracked', `<span style="color:${TEAM.H}">H ${nH}</span> <span style="color:${TEAM.A}">A ${nA}</span> · ${PL.length}`, PL.length !== 22 ? col('warn') : null);
   if (b) for (const s of ['H', 'A']) { let nn = null; for (const p of PL) if (ds.sideOf(p.k) === s) { const d = ds.metres(b, p); if (!nn || d < nn.d) nn = { d, k: p.k }; } if (nn) row(`nearest ${s}`, `#${ds.numOf(nn.k)} · ${nn.d.toFixed(2)} m`, TEAM[s]); }
   let fast = null; for (const p of PL) if (Number.isFinite(p.sd) && (!fast || p.sd > fast.sd)) fast = p; if (fast) row('fastest', `#${ds.numOf(fast.k)} ${fast.sd.toFixed(1)} m/s${fast.sd > ds.meta.bolt ? ' › Bolt' : ''}`, fast.sd > ds.meta.bolt ? col('bolt') : null);
   if (ds.meta.hom_err) { const e = ds.meta.hom_err[r]; row('homography err', e < 0 ? 'none' : e.toFixed(2), e < 0 || e > 3 ? col('bad') : e > 1 ? col('warn') : col('good')); }
   if (E.dead) { const D = E.dead; row('dead ball (sync)', D.mask[r] ? D.why(r).join(' + ') : !D.covered[r] ? 'alive · no counterpart' : 'alive', D.mask[r] ? TEAM.D : null); }
+  if (E.algSwitchByFrame) {
+    const sw = E.algSwitchByFrame.get(r) || [];
+    for (const s of sw) {
+      row('alg switch', `${s.algorithm || ''} ${s.from || '∅'}→${s.to} · ${s.reason}`, s.reason === 'balldet_fallback' ? '#ffdc00' : TEAM[s.to]);
+      row('alg detail', s.detail || '', null);
+      row('bd used?', s.bd_used ? `yes · conf ${(s.bd_conf ?? 0).toFixed(2)} ≥ ${s.bd_min_confidence}` : 'no (overlay conf is unrelated)', s.bd_used ? col('good') : col('warn'));
+    }
+  }
   const hd = ds.attackDir(f); if (hd) row('attack', `BAR ${hd > 0 ? '→' : '←'} · ATH ${hd > 0 ? '←' : '→'}`);
   for (const e of ds.meta.tags.filter(e => e.a <= f && f < e.b)) row(e.restart ? 'restart' : 'tag', e.restart ? `${e.restart[0]} · ${e.team || '-'}` : `${e.code} · ${e.team || '-'}`, e.restart ? rgb(e.restart[1]) : TEAM[e.side] || null);
   const seg = store.segmentAt(r); if (seg.state !== 'clear') row('my reading', `${seg.team || '-'} · ${seg.state}`, TEAM[store.derivedLabel(r)]);
@@ -1535,7 +1904,33 @@ function buildRows() {
       mask('NO COUNTERPART', r => !D.covered[r], '#5f656d'), mask('OFF PITCH T (ELSE B)', r => D.offPitch[r], col('off')),
       mask('STILL-BALL GAP', r => D.still[r], col('dbstill'))]);
   }
-  const ev = [{ name: 'RESTART', kind: 'restart' }, mask('KICK', r => E.kick.has(r), col('kick'))];
+  const ev = [
+    { name: 'RESTART', kind: 'restart' },
+    mask('KICK ‖Δv‖', r => E.kick.has(r), col('kick')),
+    mask('KICK EXTREMA', r => E.kickExtrema && E.kickExtrema.has(r), col('kickex')),
+    {
+      name: 'BALL ACCEL', kind: 'wave', height: WAVEH, vmax: 20, threshold: 4,
+      get: r => {
+        if (E.accelMag && Number.isFinite(E.accelMag[r])) return E.accelMag[r];
+        const b = ds.ball(r); return b && Number.isFinite(b.acc) ? b.acc : NaN;
+      },
+      marks: [
+        { frames: () => [...E.kick], color: col('kick'), label: '‖Δv‖' },
+        { frames: () => E.kickExtremaFrames || [], color: col('kickex'), label: 'extrema' },
+      ],
+      title: '‖Δv_xy‖·fps (m/s²). Yellow ticks = vector_peak kicks (≥4); cyan = extrema kicks.',
+    },
+    {
+      name: 'BALL ACCEL aₓ aᵧ', kind: 'wave2', height: WAVEH, vmax: 20,
+      getX: r => (E.accelX && Number.isFinite(E.accelX[r])) ? E.accelX[r] : NaN,
+      getY: r => (E.accelY && Number.isFinite(E.accelY[r])) ? E.accelY[r] : NaN,
+      marks: [
+        { frames: () => [...E.kick], color: col('kick') },
+        { frames: () => E.kickExtremaFrames || [], color: col('kickex') },
+      ],
+      title: 'Signed a_x (warm) and a_y (cool) in m/s² — the series extrema kicks look at. Cyan ticks = extrema.',
+    },
+  ];
   if (E.refereeFrames && E.refereeFrames.length) {
     const refColor = (ds.meta.referee && ds.meta.referee.styles && ds.meta.referee.styles.attention_raised)
       ? hex(ds.meta.referee.styles.attention_raised.hex || '#ffdc00') : hex('#ffdc00');
@@ -1586,7 +1981,14 @@ function rowStrip(row, r0, r1, W) {
   for (let i = 0; i < W; i++) { img.data[i * 4] = px[i * 3]; img.data[i * 4 + 1] = px[i * 3 + 1]; img.data[i * 4 + 2] = px[i * 3 + 2]; img.data[i * 4 + 3] = 255; }
   g.putImageData(img, 0, 0); rowCache.set(key, c); if (rowCache.size > 400) rowCache.delete(rowCache.keys().next().value); return c;
 }
-function rowVisible(name) { return !store.rows || store.rows.includes(name) || name.startsWith('#') || ALG.rowNames.has(name); }
+function rowVisible(name) {
+  if (name.startsWith('#') || ALG.rowNames.has(name)) return true;
+  if (!store.rows) return true;
+  // legacy saved filter used plain "KICK"
+  if (name === 'KICK ‖Δv‖' && store.rows.includes('KICK')) return true;
+  return store.rows.includes(name);
+}
+function rowH(row) { return (row.kind === 'wave' || row.kind === 'wave2') ? (row.height || WAVEH) : RH; }
 function groupVisible(i) { if (ROWS[i].forceHeader) return true; for (let j = i + 1; j < ROWS.length && !ROWS[j].grp; j++) if (rowVisible(ROWS[j].name)) return true; return false; }
 let bands = null, bandBin = 0;
 // about 400 bins across the export, never finer than 2 s
@@ -1596,20 +1998,110 @@ function setupTimeline() {
   c.addEventListener('mousedown', e => { if (e.offsetY < overviewHeight() + 4) { $('#v').pause(); seek(Math.round(e.offsetX / c.clientWidth * (ds.n - 1))); return; } tlDrag = { x0: e.offsetX, x1: e.offsetX }; });
   window.addEventListener('mousemove', e => { if (!tlDrag) return; const rct = c.getBoundingClientRect(); tlDrag.x1 = e.clientX - rct.left; drawTimeline(); });
   window.addEventListener('mouseup', () => { if (!tlDrag) return; const [a, b] = [tlDrag.x0, tlDrag.x1].sort((x, y) => x - y), W = c.clientWidth; if (b - a < 4) { $('#v').pause(); seek(xToFrame(a, W)); } else { view = [xToFrame(a, W), xToFrame(b, W)]; if (view[1] - view[0] < 10) view[1] = view[0] + 10; buildRows(); } tlDrag = null; drawTimeline(); });
-  c.addEventListener('mousemove', e => { const W = c.clientWidth, r = xToFrame(e.offsetX, W), tip = $('#tip2'); tip.style.display = 'block'; tip.style.left = (e.clientX + 12) + 'px'; tip.style.top = (e.clientY - 70) + 'px'; const b = ds.ball(r), seg = store.segmentAt(r); const algTxt = ALG.on.map(n => { const l = algLetter(n, r); return `<span class="mono">${n}</span> <b style="color:${TEAM[l] || TEAM.X}">${l || '-'}</b>`; }).join(' · '); tip.innerHTML = `<b class="mono">${ds.start + r}</b> · ${(r / ds.fps).toFixed(1)} s<br>GT <b style="color:${TEAM[ds.gt(r) || 'X']}">${ds.gt(r) || '-'}</b>${algTxt ? `<br>${algTxt}` : ''}${seg.state !== 'clear' ? `<br>mine ${seg.team || '-'} · ${seg.state}` : ''}<br>ball ${b ? b.sf.toFixed(1) + ' m/s' : 'lost'} · tracked ${ds.meta.count[r]}${E.dead && E.dead.mask[r] ? ` · <b style="color:${TEAM.D}">dead ball (sync)</b>` : ''}`; });
+  c.addEventListener('mousemove', e => { const W = c.clientWidth, r = xToFrame(e.offsetX, W), tip = $('#tip2'); tip.style.display = 'block'; tip.style.left = (e.clientX + 12) + 'px'; tip.style.top = (e.clientY - 70) + 'px'; const b = ds.ball(r), seg = store.segmentAt(r); const algTxt = ALG.on.map(n => { const l = algLetter(n, r); return `<span class="mono">${n}</span> <b style="color:${TEAM[l] || TEAM.X}">${l || '-'}</b>`; }).join(' · '); const am = E.accelMag ? E.accelMag[r] : (b && b.acc); const kicks = [E.kick.has(r) ? '<span style="color:var(--kick)">‖Δv‖</span>' : '', E.kickExtrema && E.kickExtrema.has(r) ? '<span style="color:var(--kickex)">extrema</span>' : ''].filter(Boolean).join(' + '); tip.innerHTML = `<b class="mono">${ds.start + r}</b> · ${(r / ds.fps).toFixed(1)} s<br>GT <b style="color:${TEAM[ds.gt(r) || 'X']}">${ds.gt(r) || '-'}</b>${algTxt ? `<br>${algTxt}` : ''}${seg.state !== 'clear' ? `<br>mine ${seg.team || '-'} · ${seg.state}` : ''}<br>ball ${b ? b.sf.toFixed(1) + ' m/s' : 'lost'}${Number.isFinite(am) ? ` · ‖a‖ ${am.toFixed(1)}` : ''} · tracked ${ds.meta.count[r]}${kicks ? `<br>kick ${kicks}` : ''}${E.dead && E.dead.mask[r] ? ` · <b style="color:${TEAM.D}">dead ball (sync)</b>` : ''}`; });
   c.addEventListener('mouseleave', () => $('#tip2').style.display = 'none');
   c.addEventListener('wheel', e => { e.preventDefault(); if (e.shiftKey) { $('#tlbody').scrollTop += e.deltaY || e.deltaX; return; } const W = c.clientWidth, r = xToFrame(e.offsetX, W), span = view[1] - view[0], k = e.deltaY > 0 ? 1.25 : .8, ns = Math.max(10, Math.min(ds.n - 1, span * k)); let a = r - (r - view[0]) * ns / span; a = Math.max(0, Math.min(ds.n - 1 - ns, a)); view = [Math.round(a), Math.round(a + ns)]; buildRows(); drawTimeline(); }, { passive: false });
   new ResizeObserver(drawTimeline).observe($('#tl'));
 }
 const xToFrame = (x, W) => Math.max(0, Math.min(ds.n - 1, Math.round(view[0] + x / W * (view[1] - view[0]))));
 const frameToX = (r, W) => (r - view[0]) / Math.max(1, view[1] - view[0]) * W;
+function sampleSeries(get, r0, r1, W) {
+  const B = bucket(r0, r1, W), vals = new Float64Array(W);
+  for (let i = 0; i < W; i++) {
+    const [a, b] = B(i); let best = NaN, absBest = -1;
+    for (let r = a; r < b; r++) {
+      const v = get(r);
+      if (!Number.isFinite(v)) continue;
+      const av = Math.abs(v);
+      if (av > absBest) { absBest = av; best = v; }
+    }
+    vals[i] = best;
+  }
+  return vals;
+}
+function drawWaveMarks(g, row, r0, r1, W, y, h) {
+  if (!row.marks) return;
+  for (const m of row.marks) {
+    const frames = typeof m.frames === 'function' ? m.frames() : (m.frames || []);
+    g.strokeStyle = m.color; g.globalAlpha = 0.9; g.lineWidth = 1;
+    for (const fr of frames) {
+      if (fr < r0 || fr > r1) continue;
+      const x = frameToX(fr, W);
+      g.beginPath(); g.moveTo(x + 0.5, y); g.lineTo(x + 0.5, y + h); g.stroke();
+    }
+  }
+  g.globalAlpha = 1; g.lineWidth = 1;
+}
+function drawWaveRow(g, row, r0, r1, W, y, h) {
+  g.fillStyle = '#14161a'; g.fillRect(0, y, W, h);
+  const vals = sampleSeries(row.get, r0, r1, W);
+  const vmax = row.vmax || 20;
+  const mid = y + h - 2;
+  // threshold line (vector_peak default 4 m/s²)
+  if (Number.isFinite(row.threshold) && row.threshold > 0) {
+    const ty = mid - (row.threshold / vmax) * (h - 4);
+    g.strokeStyle = 'rgba(255,200,0,.35)'; g.setLineDash([3, 3]);
+    g.beginPath(); g.moveTo(0, ty); g.lineTo(W, ty); g.stroke(); g.setLineDash([]);
+  }
+  g.beginPath();
+  let started = false;
+  for (let i = 0; i < W; i++) {
+    const v = vals[i];
+    if (!Number.isFinite(v)) { started = false; continue; }
+    const yy = mid - Math.min(1, Math.max(0, v / vmax)) * (h - 4);
+    if (!started) { g.moveTo(i, yy); started = true; } else g.lineTo(i, yy);
+  }
+  g.strokeStyle = '#c8dcff'; g.lineWidth = 1.25; g.stroke(); g.lineWidth = 1;
+  // fill under curve lightly
+  g.globalAlpha = 0.18; g.fillStyle = '#c8dcff';
+  started = false;
+  g.beginPath();
+  for (let i = 0; i < W; i++) {
+    const v = vals[i];
+    if (!Number.isFinite(v)) {
+      if (started) { g.lineTo(i - 1, mid); g.closePath(); g.fill(); g.beginPath(); started = false; }
+      continue;
+    }
+    const yy = mid - Math.min(1, Math.max(0, v / vmax)) * (h - 4);
+    if (!started) { g.moveTo(i, mid); g.lineTo(i, yy); started = true; }
+    else g.lineTo(i, yy);
+  }
+  if (started) { g.lineTo(W - 1, mid); g.closePath(); g.fill(); }
+  g.globalAlpha = 1;
+  drawWaveMarks(g, row, r0, r1, W, y, h);
+  g.fillStyle = 'rgba(255,255,255,.35)'; g.font = '9px Inter';
+  g.fillText(`0–${vmax} m/s²`, 4, y + 10);
+}
+function drawWave2Row(g, row, r0, r1, W, y, h) {
+  g.fillStyle = '#14161a'; g.fillRect(0, y, W, h);
+  const vx = sampleSeries(row.getX, r0, r1, W), vy = sampleSeries(row.getY, r0, r1, W);
+  const vmax = row.vmax || 20;
+  const zero = y + h / 2;
+  g.strokeStyle = 'rgba(255,255,255,.2)'; g.beginPath(); g.moveTo(0, zero); g.lineTo(W, zero); g.stroke();
+  const strokeSeries = (vals, color) => {
+    g.beginPath(); let started = false;
+    for (let i = 0; i < W; i++) {
+      const v = vals[i];
+      if (!Number.isFinite(v)) { started = false; continue; }
+      const yy = zero - Math.max(-1, Math.min(1, v / vmax)) * ((h / 2) - 3);
+      if (!started) { g.moveTo(i, yy); started = true; } else g.lineTo(i, yy);
+    }
+    g.strokeStyle = color; g.lineWidth = 1.1; g.stroke(); g.lineWidth = 1;
+  };
+  strokeSeries(vx, 'rgba(255,170,90,.95)');
+  strokeSeries(vy, 'rgba(90,200,255,.95)');
+  drawWaveMarks(g, row, r0, r1, W, y, h);
+  g.fillStyle = 'rgba(255,255,255,.35)'; g.font = '9px Inter';
+  g.fillText(`±${vmax} · aₓ`, 4, y + 10);
+  g.fillStyle = 'rgba(90,200,255,.7)'; g.fillText('aᵧ', 52, y + 10);
+}
 function drawTimeline() {
   if (!ROWS.length || document.body.classList.contains('notl')) return; ensureBands();
   const c = $('#tlc'), W = Math.max(50, c.clientWidth), dpr = window.devicePixelRatio || 1;
   const all = overviewItems(), items = overviewOn().map(n => all.find(i => i.name === n));
   const ovH = items.reduce((s, it) => s + (it.kind === 'strip' ? OVH : BANDH) + 1, 0);
   const TOP = ovH + 6 + FLAG; let h = TOP;
-  ROWS.forEach((r, i) => { if (r.grp) { if (groupVisible(i)) h += GG; } else if (rowVisible(r.name)) h += RH + RG; });
+  ROWS.forEach((r, i) => { if (r.grp) { if (groupVisible(i)) h += GG; } else if (rowVisible(r.name)) h += rowH(r) + RG; });
   c.width = W * dpr; c.height = h * dpr; c.style.height = h + 'px'; const g = c.getContext('2d'); g.scale(dpr, dpr);
   g.fillStyle = '#17191c'; g.fillRect(0, 0, W, h);
   // overview: strips and bands over the whole export, in the order the user picked
@@ -1634,9 +2126,12 @@ function drawTimeline() {
     const row = ROWS[i];
     if (row.grp) { if (groupVisible(i)) { mkLab(row.grp, y + 1, 'grp', row.toggle ? () => { slotsOpen = !slotsOpen; buildRows(); drawTimeline(); } : null); y += GG; } continue; }
     if (!rowVisible(row.name)) continue;
-    g.drawImage(rowStrip(row, view[0], view[1], W), 0, 0, W, 1, 0, y, W, RH);
-    mkLab(row.display || row.name, y + Math.max(0, (RH - 10) / 2), row.kind === 'slot' && pinned.includes(row.k) ? 'pin' : null, row.kind === 'slot' ? () => { pinned = pinned.includes(row.k) ? [] : [row.k]; renderPinned(); rowCache.clear(); draw(); drawTimeline(); } : null, null, row.title);
-    y += RH + RG;
+    const hh = rowH(row);
+    if (row.kind === 'wave') drawWaveRow(g, row, view[0], view[1], W, y, hh);
+    else if (row.kind === 'wave2') drawWave2Row(g, row, view[0], view[1], W, y, hh);
+    else g.drawImage(rowStrip(row, view[0], view[1], W), 0, 0, W, 1, 0, y, W, hh);
+    mkLab(row.display || row.name, y + Math.max(0, (hh - 10) / 2), row.kind === 'slot' && pinned.includes(row.k) ? 'pin' : null, row.kind === 'slot' ? () => { pinned = pinned.includes(row.k) ? [] : [row.k]; renderPinned(); rowCache.clear(); draw(); drawTimeline(); } : null, null, row.title);
+    y += hh + RG;
   }
   for (const f of E.flags) { if (f.r < view[0] || f.r > view[1]) continue; const x = frameToX(f.r, W), cc = rgb(f.color); g.strokeStyle = cc; g.globalAlpha = .5; g.beginPath(); g.moveTo(x + .5, yFlag); g.lineTo(x + .5, h); g.stroke(); g.globalAlpha = 1; glyph(g, f.glyph, x, yFlag + 6, 4.5, cc); }
   for (const r of E.restartFrames) if (r >= view[0] && r <= view[1] && !E.flags.some(f => f.r === r)) { const x = frameToX(r, W); g.strokeStyle = col('good'); g.globalAlpha = .5; g.beginPath(); g.moveTo(x + .5, yFlag); g.lineTo(x + .5, h); g.stroke(); g.globalAlpha = 1; glyph(g, 'tri_up', x, yFlag + 6, 4.5, col('good')); }
