@@ -332,8 +332,8 @@ class LinkHoernigAltBallDet(LinkHoernigAlt):
     params = {
         **LinkHoernigAlt.params,
         "attributions_json": "",          # empty -> ball_detection/export/touch_attributions.json
-        "bd_min_confidence": 0.3,
-        "bd_match_tol": 3,                # frames: match ATD kick to Stage C kick_frame
+        "bd_min_confidence": 0.5,
+        "bd_match_tol": 12,                # frames: match ATD kick to Stage C kick_frame
         # Kick source: export = track.kick from the match viewer; vector_peak / extrema recompute.
         "kick_method": KICK_METHOD_EXPORT,
         "kick_accel_m_s2": 4.0,           # vector_peak threshold
