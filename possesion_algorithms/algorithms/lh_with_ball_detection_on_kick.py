@@ -1,6 +1,13 @@
 """LH-alt with ball_detection fallback when a kick has nobody inside t_p.
 
-Same keep / switch rules as ``lh_alternative_V2.label_lh_alt``. Extra rule:
+Keep / switch rules (self-contained in this module):
+
+* Keep possession while the ball 1 s ahead stays within ``t_a`` of the holder.
+* A team change needs a kick peak within +/- ``kick_win`` frames, or the candidate
+  staying nearest within ``t_p`` for ``min_hold_s``.
+* Same-team gains go through without a kick.
+
+Extra rule:
 
 * On a kick-window frame where the nearest player is **outside** ``t_p`` (or missing),
   if Stage C ``touch_attributions.json`` names a team for that kick with enough confidence,
@@ -23,11 +30,12 @@ with a switch usually means the switch came from LH nearest/kick/hold, not from 
 
 ``lh_balldet_gk_dead`` adds corrected keepers and paints D on ``dead_ball.json`` frames, but
 labels the **whole** covered video in one pass (``dead_ball_continuous``) instead of restarting
-on every alive gap the way ``lh_alt_gk_dead`` does.
+on every alive gap.
 """
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 from typing import Any
@@ -36,13 +44,7 @@ import numpy as np
 
 from ball_detection.kicks import KICK_METHODS, detect_kicks
 from ball_detection.paths import EXPORT_DIR as BALLDET_EXPORT
-from possesion_algorithms.algorithms.lh_alternative_V2 import (
-    LinkHoernigAlt,
-    _ball_distances,
-    load_derived_goalkeepers,
-    with_derived_goalkeepers,
-)
-from possesion_algorithms.base import TACTICAL, Tracking
+from possesion_algorithms.base import TACTICAL, PossessionAlgorithm, Tracking
 from possesion_algorithms.paths import GOALKEEPER_CSV
 
 DEFAULT_ATTRIBUTIONS_JSON = os.path.join(BALLDET_EXPORT, "touch_attributions.json")
@@ -50,6 +52,75 @@ DEFAULT_ATTRIBUTIONS_JSON = os.path.join(BALLDET_EXPORT, "touch_attributions.jso
 # kick_method values: export (match-viewer track.kick) or a ball_detection.kicks method.
 KICK_METHOD_EXPORT = "export"
 KICK_METHOD_CHOICES = (KICK_METHOD_EXPORT, *KICK_METHODS)
+
+# Base LH-alt defaults (inlined so this module does not import other algorithms).
+_LH_ALT_PARAMS = {
+    "t_p": 1.0,
+    "t_a": 2.5,
+    "horizon_s": 1.0,
+    "kick_win": 4,
+    "min_hold_s": 0.5,
+}
+
+
+def _ball_distances(ball: np.ndarray, xy: np.ndarray, pitch: tuple) -> np.ndarray:
+    """(n, S) ball-to-slot distance in metres, inf where the ball or the slot is missing."""
+    m = np.asarray(pitch, dtype=np.float32)
+    d = np.hypot(*np.moveaxis((xy - ball[:, None, :]) * m, -1, 0))
+    return np.where(np.isfinite(d), d, np.inf).astype(np.float32)
+
+
+def load_derived_goalkeepers(path: str, start: int, n: int) -> np.ndarray:
+    """Home/away keeper pitch fractions for absolute frames start .. start + n - 1.
+
+    Returns (n, 2, 2) with axis-1 order (home, away). Missing or unassigned frames are NaN.
+    """
+    if n <= 0:
+        return np.full((0, 2, 2), np.nan, dtype=np.float32)
+    if not os.path.isfile(path):
+        raise IOError(
+            f"no derived goalkeeper tracks at {path}\n"
+            "  make them:  python data_correction/goalkeeper_trackers/run.py"
+        )
+    out = np.full((n, 2, 2), np.nan, dtype=np.float32)
+    side_index = {"home": 0, "away": 1}
+    end = start + n
+    with open(path, newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh)
+        if not reader.fieldnames or "frame" not in reader.fieldnames:
+            raise ValueError(f"{path}: expected a goalkeeper_tracks.csv header")
+        for row in reader:
+            side = (row.get("team_side") or "").strip().lower()
+            if side not in side_index:
+                continue
+            frame = int(float(row["frame"]))
+            if frame < start or frame >= end:
+                continue
+            x, y = row.get("x", ""), row.get("y", "")
+            if x == "" or y == "":
+                continue
+            out[frame - start, side_index[side]] = (float(x), float(y))
+    return out
+
+
+def with_derived_goalkeepers(track: Tracking, derived: np.ndarray,
+                             raw_tracker_ids: tuple[str, ...]) -> tuple[np.ndarray, np.ndarray]:
+    """Drop the raw keeper slots and append corrected home/away keepers as the last two slots.
+
+    `derived` is (track.n, 2, 2) for this stretch of frames. Returns (xy, team).
+    """
+    if track.slot_ids is None:
+        raise ValueError("tracking has no slot_ids; cannot locate raw goalkeeper trackers")
+    raw = {str(t) for t in raw_tracker_ids}
+    keep = np.array([str(sid) not in raw for sid in track.slot_ids], dtype=bool)
+    missing = sorted(raw - {str(sid) for sid in track.slot_ids})
+    if missing:
+        raise ValueError(f"raw goalkeeper tracker(s) not in tracking: {missing}")
+    if derived.shape != (track.n, 2, 2):
+        raise ValueError(f"derived keepers shape {derived.shape} does not match track length {track.n}")
+    xy = np.concatenate((track.xy[:, keep], derived.astype(np.float32, copy=False)), axis=1)
+    team = np.concatenate((track.team[keep], np.asarray(["H", "A"], dtype="<U1")))
+    return xy, team
 
 
 def filter_kicks_require_rise(
@@ -321,7 +392,7 @@ def _switch_detail(reason, team_before, last_team, dk, t_p, nearest_team,
     return f"{prev}→{last_team} ({reason})"
 
 
-class LinkHoernigAltBallDet(LinkHoernigAlt):
+class LinkHoernigAltBallDet(PossessionAlgorithm):
     """LH-alt plus Stage C kick-team hints when no player is within t_p at a kick."""
 
     name = "lh_balldet"
@@ -330,7 +401,7 @@ class LinkHoernigAltBallDet(LinkHoernigAlt):
     dead_ball = False
     source = TACTICAL
     params = {
-        **LinkHoernigAlt.params,
+        **_LH_ALT_PARAMS,
         "attributions_json": "",          # empty -> ball_detection/export/touch_attributions.json
         "bd_min_confidence": 0.5,
         "bd_match_tol": 12,                # frames: match ATD kick to Stage C kick_frame
@@ -348,6 +419,10 @@ class LinkHoernigAltBallDet(LinkHoernigAlt):
 
     def __init__(self, **params):
         super().__init__(**params)
+        nonnegative = ("t_p", "t_a", "horizon_s", "kick_win", "min_hold_s")
+        bad = [name for name in nonnegative if self.params[name] < 0]
+        if bad:
+            raise ValueError(f"{self.name}: parameters must be non-negative: {bad}")
         if self.params["bd_min_confidence"] < 0:
             raise ValueError(f"{self.name}: bd_min_confidence must be non-negative")
         if self.params["bd_match_tol"] < 0:
