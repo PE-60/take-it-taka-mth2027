@@ -18,6 +18,7 @@ possession_by_frame.pkl
 # Any file in results/ is a set of labels for the whole match. A perfect one is a copy of the
 # ground truth, so the folder ships empty and stays that way.
 evaluation/results/*.csv
+evaluation/results/*.json
 
 # ...with one deliberate exception. The baselines are computed from the ATD alone -- the same ATD
 # every enrolled participant has -- and never read a ground truth of any kind, so they carry no
@@ -48,6 +49,8 @@ data/*
 # *.pdf stays as insurance: internal decks and proposals have a habit of landing in the working
 # tree, and this repository is public.
 *.pdf
+# sure but exclude the documentation of the approach
+!Take-It-Taka.pdf
 
 # Organiser tooling lives in ../mtah2027-organizers, outside this repository. This line is
 # insurance against it being recreated in here by habit.
@@ -62,7 +65,6 @@ __pycache__/
 venv/
 env/
 .DS_Store
-.claude/settings.local.json
 
 
 # exported data from the local instance of match viewer (just local data from loading the match)
@@ -74,5 +76,8 @@ dead_ball_investigation/dead_ball.json
 # corrected data about goalkeepers
 data_correction/goalkeeper_trackers/goalkeeper_tracks.csv
 
-# gap_lgbm: cached teacher labels and features (derived from the match data)
-possesion_algorithms/gap_lgbm/cache/
+# ball detection exports ignore
+ball_detection/export/*
+
+# lgbm cache
+possesion_algorithms/gap_lgbm/cache/*

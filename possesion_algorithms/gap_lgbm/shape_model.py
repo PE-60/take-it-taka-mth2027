@@ -123,8 +123,10 @@ def fit_and_label_shape(teacher: np.ndarray, tf: TeamFeatures, live: np.ndarray,
     booster = M._fit(lgbm_params, np.vstack([build_shape_X(tf, tr, True), build_shape_X(tf, tr, False)]),
                      np.r_[y, ~y].astype(float), rounds=rounds, seed=seed + 399)
     labels = np.full(n, "", dtype="<U1")
+    p_final = np.full(n, np.nan)                    # P(home) per alive frame from the final model
     if len(rows_all):
         p = predict_shape(booster, tf, rows)
+        p_final[rows] = p
         dec = M.viterbi_gaps(p, segs, best["p_switch"], best["tau"])
         labels[rows] = np.where(dec, "H", "A")
     agree = float(np.mean(labels[rows][valid] == teacher[rows][valid])) if valid.any() else float("nan")
@@ -135,6 +137,8 @@ def fit_and_label_shape(teacher: np.ndarray, tf: TeamFeatures, live: np.ndarray,
               "agreement_with_teacher_in_sample": agree, "alive_intervals": segs.n,
               "top_features_gain": [[k, round(g, 1)] for k, g in top],
               "seconds": round(time.time() - t_start, 1)}
+    # per-frame probabilities for the caller to write out; not part of the JSON report
+    report["_proba"] = {"p_home": p_final, "p_home_oof": oof}
     log(f"{TAG}: final model {rounds} trees; agrees with the teacher on {100 * agree:.1f}% of its labelled frames "
         f"(in sample); {report['seconds']} s")
     return labels, report

@@ -45,6 +45,8 @@ json5
 jsonpointer
 jsonschema
 jsonschema-specifications
+jupyter-events
+jupyter-lsp
 jupyter_builder
 jupyter_client
 jupyter_core
@@ -66,6 +68,7 @@ matplotlib
 matplotlib-inline
 mistune
 multidict
+narwhals
 nbclient
 nbconvert
 nbformat
@@ -103,6 +106,7 @@ rfc3339-validator
 rfc3986-validator
 rfc3987-syntax
 rpds-py
+scipy
 Send2Trash
 six
 sortedcontainers

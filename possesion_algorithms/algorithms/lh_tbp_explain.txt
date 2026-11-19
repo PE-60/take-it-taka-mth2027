@@ -1,5 +1,0 @@
-I reverted since I don't want to decide the ball's possesion when no player in it's radius by just looking at the nearest player. I would rather look at the ball's recipient and direction of kick. The direction of the kick should be towards another player, and hopefully that would be the recipient player and possibly in the direction of attack of the given team.
-
-
-
-When there are 2 or more players close to the ball (inside 1.5 meters) again use the direction of the ball, future recipient and so on.!!!!

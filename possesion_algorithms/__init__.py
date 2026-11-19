@@ -3,9 +3,10 @@
 Every algorithm is a PossessionAlgorithm subclass in possesion_algorithms/algorithms/ (any module
 there is picked up). Besides its labelling rule it declares
 
-    dead_ball   True:  label only the alive intervals of dead_ball_investigation/dead_ball.json,
-                       each one on its own, and write D on the dead balls
-                False: label the whole video
+    dead_ball              True: write D on dead_ball_investigation/dead_ball.json frames after labelling
+                           False: leave those frames to the algorithm
+    dead_ball_continuous   with dead_ball: one label() over the whole covered video, then D overlay
+                           (False = legacy: label each alive gap on its own, then D)
     source      "tactical"            the tactical tracking
                 "broadcast"           the broadcast tracking, synced onto the tactical timeline
                 "tactical+broadcast"  tactical, falling back to the synced broadcast on frames

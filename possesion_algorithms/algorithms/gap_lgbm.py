@@ -212,6 +212,24 @@ class LGBMShape(PossessionAlgorithm):
         self._labels, self.report = fit_and_label_shape(teacher, tf, live, np.isfinite(track.ball[:, 0]),
                                                         self.params)
         self._start = track.start
+        self._write_proba(track.start)
+
+    def _write_proba(self, start: int) -> None:
+        """P(home) for every alive frame, next to the results: p_home from the final model,
+        p_home_oof from the cross-validation fold that did not train on that frame."""
+        import os
+        from possesion_algorithms.paths import RESULTS_DIR
+        proba = self.report.pop("_proba", None)
+        if proba is None:
+            return
+        frames = start + np.arange(len(proba["p_home"]))
+        path = os.path.join(RESULTS_DIR, "lgbm_shape_proba.csv")
+        os.makedirs(RESULTS_DIR, exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            fh.write("frame,p_home,p_home_oof\n")
+            for f, a, b in zip(frames, proba["p_home"], proba["p_home_oof"]):
+                fh.write(f"{f},{'' if np.isnan(a) else f'{a:.4f}'},{'' if np.isnan(b) else f'{b:.4f}'}\n")
+        print(f"lgbm_shape: probabilities -> {path}")
 
     label = GapLGBM.label
 
