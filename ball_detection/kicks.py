@@ -2,8 +2,9 @@
 
 Two detectors are available:
 
-* ``vector_peak`` (default) — local maxima of ‖Δv_xy‖·fps at/above a threshold
-  (same rule as ``lh_tbp`` / match_viewer when that module is importable).
+* ``vector_peak`` (default) — local maxima of ‖Δv_xy‖·fps at/above a threshold.
+  Self-contained copy of the LH-TBP / match-viewer KICK rule (float32, usable-ball
+  velocity mask, refractory thinning). Does not import possession algorithms.
 * ``extrema`` — local minima **and** maxima of the signed pitch-axis acceleration
   components, filtered by prominence (vertical separation) and optional width
   (broadness). Captures both deflections and accelerations along a fixed direction.
@@ -197,28 +198,39 @@ def detect_kicks_vector_peak(
         threshold: float = 4.0,
         refractory_s: float = 0.3,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Local maxima of ‖Δv‖·fps at/above ``threshold`` (legacy / lh_tbp rule)."""
-    try:
-        from possesion_algorithms.algorithms.lh_tbp import detect_ball_kicks
-        return detect_ball_kicks(ball_xy, pitch_m, fps, threshold=threshold,
-                                 refractory_s=refractory_s)
-    except Exception:
-        return _detect_kicks_vector_peak_local(ball_xy, pitch_m, fps, threshold, refractory_s)
+    """Local maxima of ‖Δv‖·fps at/above ``threshold`` (LH-TBP / match-viewer KICK rule).
 
+    Faithful local port of ``link_hoernig_tbp.detect_ball_kicks``: float32 metric
+    positions, NaN velocity on frames where the ball is missing, magnitude accel
+    ‖Δv_xy‖·fps, then refractory-thinned local maxima.
+    """
+    ball_m = (np.asarray(ball_xy[..., :2], dtype=np.float32)
+              * np.asarray(pitch_m, dtype=np.float32))
+    usable = np.isfinite(ball_m).all(axis=1)
 
-def _detect_kicks_vector_peak_local(ball_xy, pitch_m, fps, threshold, refractory_s):
-    ball = _ball_m(ball_xy, pitch_m)
-    vel = _velocity_m_s(ball, fps)
-    acc_xy = _accel_vec_m_s2(vel, fps)
-    accel = _accel_mag(acc_xy)
-    kick = np.zeros(len(accel), bool)
+    n = len(ball_m)
+    vel = np.full((n, 2), np.nan, dtype=np.float32)
+    if n >= 2:
+        delta = np.diff(ball_m, axis=0) * float(fps)
+        both = np.isfinite(ball_m[:-1]).all(axis=1) & np.isfinite(ball_m[1:]).all(axis=1)
+        vel[1:] = np.where(both[:, None], delta, np.nan)
+    vel = np.where(usable[:, None], vel, np.nan)
+
+    accel = np.full(n, np.nan, dtype=np.float32)
+    if n >= 2:
+        delta_v = np.diff(vel, axis=0) * float(fps)
+        both_v = np.isfinite(vel[:-1]).all(axis=1) & np.isfinite(vel[1:]).all(axis=1)
+        mag = np.hypot(delta_v[:, 0], delta_v[:, 1])
+        accel[1:] = np.where(both_v, mag, np.nan)
+
+    kick = np.zeros(n, bool)
     a = np.where(np.isfinite(accel), accel, -np.inf)
-    for i in range(1, len(a) - 1):
-        if a[i] >= threshold and a[i] >= a[i - 1] and a[i] >= a[i + 1]:
+    for i in range(1, n - 1):
+        if a[i] >= float(threshold) and a[i] >= a[i - 1] and a[i] >= a[i + 1]:
             kick[i] = True
     refractory = int(round(float(refractory_s) * float(fps)))
     kick = _apply_refractory(kick, refractory)
-    return kick, accel.astype(np.float32)
+    return kick, accel
 
 
 def detect_kicks_extrema(

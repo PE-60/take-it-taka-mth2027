@@ -20,10 +20,15 @@ question to answer with it.
 
 Documentation on our approach to solving the Initial Challange of labeling possession for each frame can be found [here](Take-It-Taka.pdf).
 
-**In order to reproduce our final delivarable** csv file with the possession labeling of the whole tactical video, run in the root folder of the repo:
+**In order to reproduce our final delivarable** csv file with the possession labeling of the whole tactical video, **firstly put the tactical and broadcast data in ```data/``` as in the original repository of the challenge**. Then, **create a virtual environment and install all required packages**:
+```
+pip install -r requirements-full.txt
+```
+**Then from the root of the repo, run the execution script:**
 ```
 python run.py
 ```
+
 The script informs you what it does at each step. **The final file is ```evaluation/results/submission.csv```**.
 
 
